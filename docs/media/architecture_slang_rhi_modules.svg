@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640">
+  <title>Slang Ecosystem Core Architecture</title>
+  
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="grad-app" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#eff6ff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+    <linearGradient id="grad-core" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fffbeb"/>
+      <stop offset="100%" stop-color="#fef3c7"/>
+    </linearGradient>
+    <linearGradient id="grad-backend" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ecfdf5"/>
+      <stop offset="100%" stop-color="#d1fae5"/>
+    </linearGradient>
+    <linearGradient id="grad-reflection" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f5f3ff"/>
+      <stop offset="100%" stop-color="#ede9fe"/>
+    </linearGradient>
+    <linearGradient id="grad-shaderobj" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ecfeff"/>
+      <stop offset="100%" stop-color="#cffafe"/>
+    </linearGradient>
+    <linearGradient id="grad-bindless" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fdf2f8"/>
+      <stop offset="100%" stop-color="#fce7f3"/>
+    </linearGradient>
+    
+    <!-- Shadows -->
+    <filter id="card-shadow" x="-3%" y="-3%" width="106%" height="112%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#64748b" flood-opacity="0.12"/>
+    </filter>
+    
+    <!-- Markers -->
+    <marker id="arrow-down" markerWidth="10" markerHeight="8" refX="5" refY="4" orient="auto">
+      <polygon points="0 0, 10 4, 0 8" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-left" markerWidth="10" markerHeight="8" refX="5" refY="4" orient="auto">
+      <polygon points="10 0, 0 4, 10 8" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-right" markerWidth="10" markerHeight="8" refX="5" refY="4" orient="auto">
+      <polygon points="0 0, 10 4, 0 8" fill="#f59e0b"/>
+    </marker>
+  </defs>
+  
+  <rect width="100%" height="100%" fill="#fafafa"/>
+  
+  <!-- ==================== Application Layer ==================== -->
+  <g class="layer-application">
+    <rect x="40" y="30" width="880" height="90" rx="12" fill="url(#grad-app)" filter="url(#card-shadow)" stroke="#3b82f6" stroke-width="1"/>
+    <text x="60" y="55" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#1e40af">Application Layer (引擎层)</text>
+    
+    <rect x="60" y="70" width="190" height="36" rx="6" fill="#ffffff" stroke="#93c5fd"/>
+    <text x="155" y="93" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" font-weight="500" fill="#1e40af">Engine</text>
+    
+    <rect x="270" y="70" width="190" height="36" rx="6" fill="#ffffff" stroke="#93c5fd"/>
+    <text x="365" y="93" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" font-weight="500" fill="#1e40af">Material System</text>
+    
+    <rect x="480" y="70" width="190" height="36" rx="6" fill="#ffffff" stroke="#93c5fd"/>
+    <text x="575" y="93" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" font-weight="500" fill="#1e40af">AutoUI</text>
+    
+    <rect x="690" y="70" width="190" height="36" rx="6" fill="#ffffff" stroke="#93c5fd"/>
+    <text x="785" y="93" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" font-weight="500" fill="#1e40af">Agent</text>
+  </g>
+  
+  <!-- Flow Arrow 1 -->
+  <line x1="480" y1="120" x2="480" y2="155" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow-down)"/>
+  
+  <!-- ==================== Core Investment Area ==================== -->
+  <g class="layer-core">
+    <rect x="40" y="160" width="880" height="300" rx="12" fill="url(#grad-core)" filter="url(#card-shadow)" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="8,4"/>
+    <text x="60" y="190" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#b45309">核心投资区 (Core Investment)</text>
+    <text x="260" y="189" font-family="system-ui, sans-serif" font-size="12" fill="#d97706">数据驱动与自动化绑定底座</text>
+    
+    <!-- Slang Reflection Module -->
+    <g class="module-reflection" transform="translate(60, 210)">
+      <rect x="0" y="0" width="240" height="230" rx="8" fill="url(#grad-reflection)" stroke="#8b5cf6" stroke-width="1"/>
+      <text x="120" y="30" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#5b21b6">Slang Reflection</text>
+      
+      <rect x="20" y="50" width="200" height="40" rx="6" fill="#ffffff" stroke="#ddd6fe"/>
+      <text x="120" y="75" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#5b21b6">TypeLayout</text>
+      
+      <rect x="20" y="110" width="200" height="40" rx="6" fill="#ffffff" stroke="#ddd6fe"/>
+      <text x="120" y="135" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#5b21b6">ShaderObjectLayout</text>
+      
+      <rect x="20" y="170" width="200" height="40" rx="6" fill="#ffffff" stroke="#ddd6fe"/>
+      <text x="120" y="195" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#5b21b6">ParameterInfo</text>
+    </g>
+    
+    <!-- ShaderObject Module -->
+    <g class="module-shaderobject" transform="translate(360, 210)">
+      <rect x="0" y="0" width="240" height="230" rx="8" fill="url(#grad-shaderobj)" stroke="#0891b2" stroke-width="1"/>
+      <text x="120" y="30" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#0e7490">ShaderObject</text>
+      
+      <rect x="20" y="50" width="200" height="40" rx="6" fill="#ffffff" stroke="#a5f3fc"/>
+      <text x="120" y="75" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#0e7490">IShaderObject</text>
+      
+      <rect x="20" y="110" width="200" height="40" rx="6" fill="#ffffff" stroke="#a5f3fc"/>
+      <text x="120" y="135" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#0e7490">ParameterBlock</text>
+      
+      <rect x="20" y="170" width="200" height="40" rx="6" fill="#ffffff" stroke="#a5f3fc"/>
+      <text x="120" y="195" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#0e7490">ResourceBinding</text>
+    </g>
+    
+    <!-- Bindless Module -->
+    <g class="module-bindless" transform="translate(660, 210)">
+      <rect x="0" y="0" width="240" height="230" rx="8" fill="url(#grad-bindless)" stroke="#ec4899" stroke-width="1"/>
+      <text x="120" y="30" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#be185d">Bindless</text>
+      
+      <rect x="20" y="50" width="200" height="40" rx="6" fill="#ffffff" stroke="#fbcfe8"/>
+      <text x="120" y="75" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#be185d">IBindlessHeap</text>
+      
+      <rect x="20" y="110" width="200" height="40" rx="6" fill="#ffffff" stroke="#fbcfe8"/>
+      <text x="120" y="135" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#be185d">TextureHandle</text>
+      
+      <rect x="20" y="170" width="200" height="40" rx="6" fill="#ffffff" stroke="#fbcfe8"/>
+      <text x="120" y="195" text-anchor="middle" font-family="'SF Mono', monospace" font-size="13" fill="#be185d">BufferHandle</text>
+    </g>
+    
+    <!-- Bidirectional Arrows -->
+    <line x1="305" y1="325" x2="355" y2="325" stroke="#f59e0b" stroke-width="2" marker-start="url(#arrow-left)" marker-end="url(#arrow-right)"/>
+    <text x="330" y="315" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="500" fill="#b45309">布局映射</text>
+    
+    <line x1="605" y1="325" x2="655" y2="325" stroke="#f59e0b" stroke-width="2" marker-start="url(#arrow-left)" marker-end="url(#arrow-right)"/>
+    <text x="630" y="315" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="500" fill="#b45309">句柄填充</text>
+  </g>
+  
+  <!-- Flow Arrow 2 -->
+  <line x1="480" y1="460" x2="480" y2="495" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow-down)"/>
+  
+  <!-- ==================== Backend Layer ==================== -->
+  <g class="layer-backend">
+    <rect x="40" y="500" width="880" height="110" rx="12" fill="url(#grad-backend)" filter="url(#card-shadow)" stroke="#10b981" stroke-width="1"/>
+    <text x="60" y="525" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#047857">Slang-RHI Backend Layer</text>
+    
+    <!-- Vulkan -->
+    <rect x="60" y="540" width="190" height="56" rx="6" fill="#ffffff" stroke="#6ee7b7"/>
+    <text x="75" y="562" font-family="'SF Mono', monospace" font-size="14" font-weight="600" fill="#047857">Vulkan</text>
+    <text x="75" y="582" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">VMA, SPIR-V</text>
+    <circle cx="230" cy="558" r="5" fill="#22c55e"/>
+    <text x="215" y="562" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#16a34a">成熟</text>
+    
+    <!-- D3D12 -->
+    <rect x="270" y="540" width="190" height="56" rx="6" fill="#ffffff" stroke="#6ee7b7"/>
+    <text x="285" y="562" font-family="'SF Mono', monospace" font-size="14" font-weight="600" fill="#047857">D3D12</text>
+    <text x="285" y="582" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">D3D12MA, DXIL</text>
+    <circle cx="440" cy="558" r="5" fill="#22c55e"/>
+    <text x="425" y="562" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#16a34a">成熟</text>
+    
+    <!-- Metal -->
+    <rect x="480" y="540" width="190" height="56" rx="6" fill="#ffffff" stroke="#fcd34d"/>
+    <text x="495" y="562" font-family="'SF Mono', monospace" font-size="14" font-weight="600" fill="#b45309">Metal</text>
+    <text x="495" y="582" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">MSL</text>
+    <circle cx="650" cy="558" r="5" fill="#eab308"/>
+    <text x="650" y="582" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#ca8a04">开发中 (缺Bindless)</text>
+    
+    <!-- WebGPU -->
+    <rect x="690" y="540" width="190" height="56" rx="6" fill="#ffffff" stroke="#fcd34d"/>
+    <text x="705" y="562" font-family="'SF Mono', monospace" font-size="14" font-weight="600" fill="#b45309">WebGPU</text>
+    <text x="705" y="582" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">WGSL</text>
+    <circle cx="860" cy="558" r="5" fill="#eab308"/>
+    <text x="860" y="582" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#ca8a04">开发中</text>
+  </g>
+</svg>

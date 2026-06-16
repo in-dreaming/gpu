@@ -1,0 +1,4 @@
+[submodule "modules/3rd/slang-rhi"]
+	path = modules/3rd/slang-rhi
+	url = https://github.com/in-dreaming/slang-rhi.git
+	branch = engine/gpu/main
