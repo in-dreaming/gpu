@@ -2,3 +2,11 @@
 	path = modules/3rd/slang-rhi
 	url = https://github.com/in-dreaming/slang-rhi.git
 	branch = engine/gpu/main
+[submodule "modules/3rd/sdl"]
+	path = modules/3rd/sdl
+	url = https://github.com/in-dreaming/SDL.git
+	branch = enjin/gpu/main
+[submodule "modules/3rd/slang"]
+	path = modules/3rd/slang
+	url = https://github.com/in-dreaming/slang.git
+	branch = master

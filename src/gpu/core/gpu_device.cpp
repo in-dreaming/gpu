@@ -1,5 +1,7 @@
 #include "gpu/core/gpu_device.h"
 #include "gpu/core/gpu_command.h"
+#include "gpu/core/gpu_buffer.h"
+#include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_internal.h"
 
 GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
@@ -36,6 +38,27 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
 void gpuDestroyDevice(GpuDevice device)
 {
     if (!device) return;
+
+    for (uint32_t i = 1; i < 4096; i++) {
+        auto& slot = device->bufferPool.slots[i];
+        if (slot.alive && slot.ptr) {
+            slot.ptr->release();
+            slot.ptr = nullptr;
+            slot.alive = false;
+        }
+    }
+
+    gpuQueueWaitOnHost((GpuCommandQueue)device->graphicsQueue.get());
+
+    for (uint32_t i = 1; i < 4096; i++) {
+        auto& slot = device->texturePool.slots[i];
+        if (slot.alive && slot.ptr) {
+            slot.ptr->release();
+            slot.ptr = nullptr;
+            slot.alive = false;
+        }
+    }
+
     device->graphicsQueue = nullptr;
     device->rhiDevice = nullptr;
     delete device;

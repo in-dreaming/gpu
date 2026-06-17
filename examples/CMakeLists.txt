@@ -56,3 +56,4 @@ endfunction()
 
 add_gpu_example(00_window)
 add_gpu_example(00_window_clear)
+add_gpu_example(01_device_init)

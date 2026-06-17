@@ -6,6 +6,8 @@ set(GPU_PUBLIC_HEADERS
     core/gpu_device.h
     core/gpu_command.h
     core/gpu_render_pass.h
+    core/gpu_buffer.h
+    core/gpu_texture.h
     platform/gpu_platform.h
     platform/gpu_surface.h
     platform/gpu_swapchain.h
@@ -14,7 +16,10 @@ set(GPU_PUBLIC_HEADERS
 set(GPU_SOURCES
     core/gpu_device.cpp
     core/gpu_render_pass.cpp
+    core/gpu_buffer.cpp
+    core/gpu_texture.cpp
     core/gpu_internal.h
+    core/gpu_handle_pool.h
     platform/gpu_platform_sdl.cpp
     platform/gpu_surface.cpp
     platform/gpu_swapchain.cpp
@@ -60,6 +65,7 @@ if(GPU_INSTALL)
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gpu
         FILES_MATCHING PATTERN "*.h"
         PATTERN "gpu_internal.h" EXCLUDE
+        PATTERN "gpu_handle_pool.h" EXCLUDE
     )
 
     configure_package_config_file(

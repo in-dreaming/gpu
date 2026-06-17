@@ -205,22 +205,32 @@ typedef struct {
 GpuResult gpuCreateSwapchain(GpuDevice device, const GpuSwapchainDesc* desc, GpuSwapchain* outSwapchain);
 void gpuDestroySwapchain(GpuDevice device, GpuSwapchain swapchain);
 
-GpuResult gpuSwapchainAcquireNextImage(GpuSwapchain swapchain, GpuTextureHandle* outImage);
-GpuResult gpuSwapchainPresent(GpuSwapchain swapchain, uint32_t imageIndex);
+GpuResult gpuSwapchainAcquireNextImage(GpuSwapchain swapchain, GpuSurfaceTexture* outTexture);
+GpuResult gpuSwapchainPresent(GpuSwapchain swapchain);
 
 uint32_t gpuSwapchainGetImageCount(GpuSwapchain swapchain);
 uint32_t gpuSwapchainGetWidth(GpuSwapchain swapchain);
 uint32_t gpuSwapchainGetHeight(GpuSwapchain swapchain);
+GpuResult gpuSwapchainResize(GpuSwapchain swapchain, uint32_t width, uint32_t height);
 ```
 
 **内部实现**:
 
-| 后端 | 实现方式 |
+Swapchain 作为 Surface 的便利封装，所有操作委托给 `GpuSurface`:
+
+| 方法 | 委托目标 |
 |:---|:---|
-| Vulkan | `VkSwapchainKHR` + `vkAcquireNextImageKHR` + `vkQueuePresentKHR` |
-| D3D12 | `IDXGISwapChain3` + `GetCurrentBackBufferIndex()` + `Present()` |
-| Metal | `CAMetalLayer` + `nextDrawable` + `presentDrawable:` |
-| WebGPU | `wgpuSurfaceConfigure` + `wgpuSurfaceGetCurrentTexture` + `wgpuSurfacePresent` |
+| `gpuCreateSwapchain` | `gpuSurfaceConfigure` |
+| `gpuSwapchainAcquireNextImage` | `gpuSurfaceAcquireNextImage` |
+| `gpuSwapchainPresent` | `gpuSurfacePresent` |
+| `gpuSwapchainResize` | `gpuSurfaceUnconfigure` + `gpuSurfaceConfigure` |
+| `gpuDestroySwapchain` | `gpuSurfaceUnconfigure` |
+
+> **设计偏差说明**: 原设计 `gpuSwapchainAcquireNextImage` 返回 `GpuTextureHandle`，
+> 实际实现返回 `GpuSurfaceTexture`（不透明指针）。原因：slang-rhi 的 `ISurface`
+> 模型直接暴露 `ComPtr<ITexture>` 包装为 `GpuSurfaceTexture`，而非通用 handle
+> 池中的 `GpuTextureHandle`。Surface texture 具有独立生命周期
+> (`gpuSurfaceTextureRelease`)，不适合纳入全局 handle 池。
 
 **Sync 语义**:
 - `AcquireNextImage` 内部使用 semaphore (Vulkan) / fence (D3D12) 确保图像可用
@@ -269,19 +279,16 @@ int main() {
             if (ev.type == GPU_PLATFORM_EVENT_QUIT) goto done;
         }
 
-        GpuTextureHandle backbuffer;
-        gpuSwapchainAcquireNextImage(swapchain, &backbuffer);
+        GpuSurfaceTexture backbuffer = NULL;
+        if (gpuSwapchainAcquireNextImage(swapchain, &backbuffer) != GPU_SUCCESS) continue;
 
-        GpuCommandBuffer cmd = gpuBeginCommandBuffer(device);
-        float clearColor[4] = { 0.1f, 0.1f, 0.2f, 1.0f };
-        gpuCmdClearColor(cmd, backbuffer, clearColor);
-        gpuEndCommandBuffer(cmd);
+        GpuCommandEncoder enc = gpuBeginCommandEncoder(queue);
+        gpuCmdClearSurfaceTexture(enc, backbuffer, 0.1f, 0.1f, 0.2f, 1.0f);
+        GpuCommandBuffer cmd = gpuFinishCommandEncoder(enc);
+        if (cmd) gpuQueueSubmit(queue, 1, &cmd);
 
-        GpuCommandQueue queue;
-        gpuGetQueue(device, GPU_QUEUE_TYPE_GRAPHICS, &queue);
-        gpuQueueSubmit(queue, 1, &cmd);
-
-        gpuSwapchainPresent(swapchain, 0);
+        gpuSwapchainPresent(swapchain);
+        gpuSurfaceTextureRelease(backbuffer);
         frameCount++;
     }
 
@@ -292,7 +299,6 @@ done:
     gpuDestroyDevice(device);
     gpuDestroyWindow(window);
     gpuPlatformShutdown();
-    return 0;
 }
 ```
 
@@ -327,27 +333,33 @@ cmake_minimum_required(VERSION 3.24)
 project(gpu LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 option(GPU_ENABLE_VULKAN "Enable Vulkan backend" ON)
 option(GPU_ENABLE_D3D12 "Enable D3D12 backend" ON)
 option(GPU_ENABLE_METAL "Enable Metal backend" OFF)
 option(GPU_ENABLE_WEBGPU "Enable WebGPU backend" OFF)
 option(GPU_BUILD_EXAMPLES "Build examples" ON)
-option(GPU_BUILD_TESTS "Build tests" ON)
+option(GPU_BUILD_TESTS "Build tests" OFF)
 
+add_subdirectory(modules/3rd/sdl)
 add_subdirectory(modules/3rd/slang-rhi)
 add_subdirectory(src/gpu)
 
 if(GPU_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
+
+if(GPU_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
 ```
 
 **依赖集成**:
-- `modules/3rd/SDL` — SDL3 (via `FetchContent` 或子目录)
-- `modules/3rd/slang-rhi` — 已有
-- Slang SDK — 通过 slang-rhi 的 `find_package` 传递
+- `modules/3rd/sdl` — SDL3 (git submodule, `add_subdirectory`)
+- `modules/3rd/slang-rhi` — slang-rhi (git submodule, `add_subdirectory`)
+- `modules/3rd/slang` — Slang (git submodule，可选；默认由 slang-rhi 通过 FetchContent 拉取预编译包)
+- Slang SDK — 默认由 slang-rhi 自动获取 (${SLANG_RHI_FETCH_SLANG=ON})
 
 #### 0.3.2 CI 流水线
 
@@ -359,6 +371,7 @@ on: [push, pull_request]
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
         config: [Debug, Release]
@@ -367,13 +380,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: actions/setup-python@v5
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libwayland-dev libxkbcommon-dev libegl-dev libdbus-1-dev libibus-1.0-dev fcitx-libs-dev
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DGPU_BUILD_TESTS=ON
       - name: Build
         run: cmake --build build --config ${{ matrix.config }}
       - name: Test
-        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure --timeout 30
 ```
 
 ### 验证流程
@@ -395,3 +412,4 @@ jobs:
 | Swapchain 呈现 | `00_window_clear` 连续渲染 300 帧蓝色画面无闪烁 |
 | 跨平台构建 | Windows/Linux/macOS CMake 编译通过 |
 | CI 自动化 | Push/PR 触发 CI 全绿 |
+| 自动化测试 | `ctest` smoke_test 通过 |
