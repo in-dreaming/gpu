@@ -8,9 +8,24 @@ set(GPU_PUBLIC_HEADERS
     core/gpu_render_pass.h
     core/gpu_buffer.h
     core/gpu_texture.h
+    core/gpu_pipeline.h
     platform/gpu_platform.h
     platform/gpu_surface.h
     platform/gpu_swapchain.h
+    capability/gpu_capabilities.h
+    debug/gpu_debug.h
+    sync/gpu_fence.h
+    resource/gpu_barrier.h
+    resource/gpu_resource_manager.h
+    resource/gpu_readback.h
+    resource/gpu_streaming_manager.h
+    shader/gpu_shader_compiler.h
+    shader/gpu_slang_module.h
+    shader/gpu_shader_cache.h
+    reflection/gpu_type_info.h
+    reflection/gpu_reflection_cache.h
+    reflection/gpu_meta_gen.h
+    bindless/gpu_bindless_heap.h
 )
 
 set(GPU_SOURCES
@@ -18,11 +33,27 @@ set(GPU_SOURCES
     core/gpu_render_pass.cpp
     core/gpu_buffer.cpp
     core/gpu_texture.cpp
+    core/gpu_pipeline.cpp
     core/gpu_internal.h
     core/gpu_handle_pool.h
     platform/gpu_platform_sdl.cpp
     platform/gpu_surface.cpp
     platform/gpu_swapchain.cpp
+    capability/gpu_capabilities.cpp
+    debug/gpu_debug.cpp
+    sync/gpu_fence.cpp
+    resource/gpu_barrier.cpp
+    resource/gpu_resource_manager.cpp
+    resource/gpu_readback.cpp
+    resource/gpu_streaming_manager.cpp
+    shader/gpu_shader_compiler.cpp
+    shader/gpu_slang_module.cpp
+    shader/gpu_shader_cache.cpp
+    reflection/gpu_type_info.cpp
+    reflection/gpu_reflection_cache.cpp
+    reflection/gpu_meta_gen.cpp
+    bindless/gpu_bindless_heap.cpp
+    bindless/gpu_descriptor_alloc.h
 )
 
 add_library(gpu STATIC ${GPU_PUBLIC_HEADERS} ${GPU_SOURCES})

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <slang-rhi.h>
+#include <vector>
 #include "gpu/core/gpu_format.h"
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_texture.h"
@@ -9,13 +10,20 @@
 struct GpuDevice_t {
     rhi::ComPtr<rhi::IDevice> rhiDevice;
     rhi::ComPtr<rhi::ICommandQueue> graphicsQueue;
+    rhi::ComPtr<rhi::ICommandQueue> computeQueue;
+    rhi::ComPtr<rhi::ICommandQueue> transferQueue;
     GpuHandlePool<rhi::IBuffer> bufferPool;
     GpuHandlePool<rhi::ITexture> texturePool;
+    GpuHandlePool<rhi::ITextureView> textureViewPool;
+    GpuHandlePool<rhi::IShaderObject> shaderObjectPool;
+    GpuHandlePool<rhi::IPipeline> pipelinePool;
+    GpuHandlePool<rhi::IFence> fencePool;
 };
 
 struct GpuCommandEncoder_t {
     rhi::ComPtr<rhi::ICommandEncoder> rhiEncoder;
     rhi::ICommandQueue* queue;
+    GpuDevice device;
 };
 
 struct GpuCommandBuffer_t {
@@ -32,6 +40,30 @@ struct GpuSurface_t {
 
 struct GpuSurfaceTexture_t {
     rhi::ComPtr<rhi::ITexture> rhiTexture;
+};
+
+struct GpuRenderPassEncoder_t {
+    rhi::ComPtr<rhi::IRenderPassEncoder> rhiPassEncoder;
+    GpuDevice device;
+};
+
+struct GpuRenderPipeline_t {
+    rhi::ComPtr<rhi::IRenderPipeline> rhiPipeline;
+};
+
+struct GpuComputePipeline_t {
+    rhi::ComPtr<rhi::IComputePipeline> rhiPipeline;
+};
+
+struct GpuShaderProgram_t {
+    rhi::ComPtr<rhi::IShaderProgram> rhiProgram;
+    rhi::ComPtr<slang::IComponentType> linkedProgram;
+    std::vector<uint8_t> compiledData;
+};
+
+struct GpuShaderCompiler_t {
+    GpuDevice device;
+    std::string lastDiagnostic;
 };
 
 static inline rhi::Format gpuFormatToRhi(GpuFormat fmt)

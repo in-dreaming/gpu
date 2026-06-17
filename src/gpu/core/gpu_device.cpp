@@ -3,6 +3,7 @@
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_internal.h"
+#include <vector>
 
 GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
 {
@@ -28,7 +29,10 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
     device->rhiDevice = rhiDevice;
 
     rhi::ComPtr<rhi::ICommandQueue> queue;
-    rhiDevice->getQueue(rhi::QueueType::Graphics, queue.writeRef());
+    if (SLANG_FAILED(rhiDevice->getQueue(rhi::QueueType::Graphics, queue.writeRef())) || !queue) {
+        rhiDevice = nullptr;
+        return GPU_ERROR_DEVICE_LOST;
+    }
     device->graphicsQueue = queue;
 
     *outDevice = device;
@@ -39,24 +43,34 @@ void gpuDestroyDevice(GpuDevice device)
 {
     if (!device) return;
 
-    for (uint32_t i = 1; i < 4096; i++) {
+    constexpr uint32_t poolCap = GpuHandlePool<int>::capacity();
+
+    for (uint32_t i = 1; i < poolCap; i++) {
+        auto& slot = device->pipelinePool.slots[i];
+        if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
+    }
+    for (uint32_t i = 1; i < poolCap; i++) {
+        auto& slot = device->shaderObjectPool.slots[i];
+        if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
+    }
+    for (uint32_t i = 1; i < poolCap; i++) {
+        auto& slot = device->fencePool.slots[i];
+        if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
+    }
+    for (uint32_t i = 1; i < poolCap; i++) {
         auto& slot = device->bufferPool.slots[i];
-        if (slot.alive && slot.ptr) {
-            slot.ptr->release();
-            slot.ptr = nullptr;
-            slot.alive = false;
-        }
+        if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
     }
 
     gpuQueueWaitOnHost((GpuCommandQueue)device->graphicsQueue.get());
 
-    for (uint32_t i = 1; i < 4096; i++) {
+    for (uint32_t i = 1; i < poolCap; i++) {
+        auto& slot = device->textureViewPool.slots[i];
+        if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
+    }
+    for (uint32_t i = 1; i < poolCap; i++) {
         auto& slot = device->texturePool.slots[i];
-        if (slot.alive && slot.ptr) {
-            slot.ptr->release();
-            slot.ptr = nullptr;
-            slot.alive = false;
-        }
+        if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
     }
 
     device->graphicsQueue = nullptr;
@@ -72,9 +86,9 @@ GpuResult gpuGetQueue(GpuDevice device, GpuQueueType type, GpuCommandQueue* outQ
     return GPU_SUCCESS;
 }
 
-GpuCommandEncoder gpuBeginCommandEncoder(GpuCommandQueue queue)
+GpuCommandEncoder gpuBeginCommandEncoder(GpuDevice device, GpuCommandQueue queue)
 {
-    if (!queue) return nullptr;
+    if (!device || !queue) return nullptr;
 
     rhi::ICommandQueue* rhiQueue = reinterpret_cast<rhi::ICommandQueue*>(queue);
     rhi::ComPtr<rhi::ICommandEncoder> encoder;
@@ -83,6 +97,7 @@ GpuCommandEncoder gpuBeginCommandEncoder(GpuCommandQueue queue)
     GpuCommandEncoder enc = new GpuCommandEncoder_t();
     enc->rhiEncoder = encoder;
     enc->queue = rhiQueue;
+    enc->device = device;
     return enc;
 }
 
@@ -106,12 +121,21 @@ GpuResult gpuQueueSubmit(GpuCommandQueue queue, uint32_t count, GpuCommandBuffer
 
     rhi::ICommandQueue* rhiQueue = reinterpret_cast<rhi::ICommandQueue*>(queue);
 
+    std::vector<rhi::ICommandBuffer*> rhiCmdBufs;
+    std::vector<GpuCommandBuffer_t*> toDelete;
     for (uint32_t i = 0; i < count; i++) {
         if (!cmdBuffers[i]) continue;
         GpuCommandBuffer_t* buf = static_cast<GpuCommandBuffer_t*>(cmdBuffers[i]);
-        rhiQueue->submit(buf->rhiCmdBuffer);
-        delete buf;
+        rhiCmdBufs.push_back(buf->rhiCmdBuffer);
+        toDelete.push_back(buf);
     }
+
+    rhi::SubmitDesc submitDesc = {};
+    submitDesc.commandBuffers = rhiCmdBufs.data();
+    submitDesc.commandBufferCount = (uint32_t)rhiCmdBufs.size();
+    rhiQueue->submit(submitDesc);
+
+    for (auto* buf : toDelete) delete buf;
     return GPU_SUCCESS;
 }
 
@@ -120,4 +144,139 @@ GpuResult gpuQueueWaitOnHost(GpuCommandQueue queue)
     if (!queue) return GPU_ERROR_INVALID_ARGS;
     rhi::ICommandQueue* rhiQueue = reinterpret_cast<rhi::ICommandQueue*>(queue);
     return SLANG_SUCCEEDED(rhiQueue->waitOnHost()) ? GPU_SUCCESS : GPU_ERROR_INTERNAL;
+}
+
+GpuRenderPassEncoder gpuCmdBeginRenderPass(GpuCommandEncoder encoder, const GpuRenderPassDesc* desc)
+{
+    if (!encoder || !desc || desc->colorAttachmentCount == 0) return nullptr;
+    if (desc->colorAttachmentCount > 8) return nullptr;  // Limit to 8 attachments
+
+    rhi::RenderPassColorAttachment colorAttachments[8];
+    for (uint32_t i = 0; i < desc->colorAttachmentCount; i++) {
+        auto& src = desc->colorAttachments[i];
+        auto& dst = colorAttachments[i];
+
+        if (src.attachment) {
+            // Surface texture path
+            GpuSurfaceTexture_t* surfTex = static_cast<GpuSurfaceTexture_t*>(src.attachment);
+            dst.view = surfTex->rhiTexture->getDefaultView();
+        } else if (src.viewHandle.index != 0) {
+            // Texture view path (preferred for render-to-texture)
+            rhi::ITextureView* view = encoder->device->textureViewPool.resolve(src.viewHandle.index, src.viewHandle.generation);
+            if (view) {
+                dst.view = view;
+            }
+        } else if (src.textureHandle.index != 0) {
+            // Legacy: Regular texture path using default view
+            rhi::ITexture* tex = encoder->device->texturePool.resolve(src.textureHandle.index, src.textureHandle.generation);
+            if (tex) {
+                dst.view = tex->getDefaultView();
+            }
+        }
+        dst.loadOp = (rhi::LoadOp)src.loadOp;
+        dst.storeOp = (rhi::StoreOp)src.storeOp;
+        dst.clearValue[0] = src.clearValue[0];
+        dst.clearValue[1] = src.clearValue[1];
+        dst.clearValue[2] = src.clearValue[2];
+        dst.clearValue[3] = src.clearValue[3];
+    }
+
+    rhi::RenderPassDesc rhiDesc = {};
+    rhiDesc.colorAttachments = colorAttachments;
+    rhiDesc.colorAttachmentCount = desc->colorAttachmentCount;
+
+    auto* passEncoder = encoder->rhiEncoder->beginRenderPass(rhiDesc);
+    if (!passEncoder) return nullptr;
+
+    GpuRenderPassEncoder enc = new GpuRenderPassEncoder_t();
+    enc->rhiPassEncoder = passEncoder;
+    enc->device = encoder->device;
+    return enc;
+}
+
+void gpuCmdEndRenderPass(GpuRenderPassEncoder pass)
+{
+    if (!pass) return;
+    pass->rhiPassEncoder->end();
+    delete pass;
+}
+
+void gpuCmdBindRenderPipeline(GpuRenderPassEncoder pass, GpuRenderPipeline pipeline)
+{
+    if (!pass || !pipeline) return;
+    auto* rhiPipe = static_cast<GpuRenderPipeline_t*>(pipeline)->rhiPipeline.get();
+    pass->rhiPassEncoder->bindPipeline(rhiPipe);
+}
+
+void gpuCmdSetViewport(GpuRenderPassEncoder pass, float x, float y, float width, float height)
+{
+    if (!pass) return;
+    rhi::RenderState state = {};
+    state.viewportCount = 1;
+    state.viewports[0].originX = x;
+    state.viewports[0].originY = y;
+    state.viewports[0].extentX = width;
+    state.viewports[0].extentY = height;
+    state.viewports[0].minZ = 0.0f;
+    state.viewports[0].maxZ = 1.0f;
+    state.scissorRectCount = 1;
+    state.scissorRects[0].minX = (int32_t)x;
+    state.scissorRects[0].minY = (int32_t)y;
+    state.scissorRects[0].maxX = (int32_t)(x + width);
+    state.scissorRects[0].maxY = (int32_t)(y + height);
+    pass->rhiPassEncoder->setRenderState(state);
+}
+
+void gpuCmdSetVertexBuffer(GpuRenderPassEncoder pass, uint32_t slot, GpuBufferHandle buffer, uint64_t offset)
+{
+    if (!pass || buffer.index == 0) return;
+    rhi::IBuffer* rhiBuf = pass->device->bufferPool.resolve(buffer.index, buffer.generation);
+    if (!rhiBuf) return;
+
+    rhi::RenderState state = {};
+    state.vertexBuffers[slot] = rhi::BufferOffsetPair(rhiBuf, offset);
+    state.vertexBufferCount = slot + 1;
+    pass->rhiPassEncoder->setRenderState(state);
+}
+
+void gpuCmdDraw(GpuRenderPassEncoder pass, uint32_t vertexCount, uint32_t instanceCount,
+                uint32_t startVertex, uint32_t startInstance)
+{
+    if (!pass) return;
+    rhi::DrawArguments args = {};
+    args.vertexCount = vertexCount;
+    args.instanceCount = instanceCount;
+    args.startVertexLocation = startVertex;
+    args.startInstanceLocation = startInstance;
+    pass->rhiPassEncoder->draw(args);
+}
+
+GpuComputePassEncoder gpuCmdBeginComputePass(GpuCommandEncoder encoder)
+{
+    if (!encoder) return nullptr;
+    auto* passEncoder = encoder->rhiEncoder->beginComputePass();
+    if (!passEncoder) return nullptr;
+    return (GpuComputePassEncoder)passEncoder;
+}
+
+void gpuCmdEndComputePass(GpuComputePassEncoder pass)
+{
+    if (!pass) return;
+    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
+    rhiPass->end();
+}
+
+void gpuCmdBindComputePipeline(GpuComputePassEncoder pass, GpuComputePipeline pipeline)
+{
+    if (!pass || !pipeline) return;
+    auto* rhiPipe = static_cast<GpuComputePipeline_t*>(pipeline)->rhiPipeline.get();
+    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
+    rhiPass->bindPipeline(rhiPipe);
+}
+
+void gpuCmdDispatchCompute(GpuComputePassEncoder pass, uint32_t x, uint32_t y, uint32_t z)
+{
+    if (!pass) return;
+    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
+    rhiPass->dispatchCompute(x, y, z);
 }

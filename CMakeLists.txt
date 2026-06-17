@@ -13,7 +13,7 @@ option(GPU_ENABLE_D3D12 "Enable D3D12 backend" ON)
 option(GPU_ENABLE_METAL "Enable Metal backend" OFF)
 option(GPU_ENABLE_WEBGPU "Enable WebGPU backend" OFF)
 option(GPU_BUILD_EXAMPLES "Build examples" ON)
-option(GPU_BUILD_TESTS "Build tests" OFF)
+option(GPU_BUILD_TESTS "Build tests" ON)
 option(GPU_INSTALL "Enable install rules" ON)
 
 include(CTest)

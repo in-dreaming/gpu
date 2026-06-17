@@ -83,8 +83,7 @@ int main(void)
         res = gpuSurfaceAcquireNextImage(surface, &backbuffer);
         if (res != GPU_SUCCESS) continue;
 
-        GpuCommandEncoder encoder = gpuBeginCommandEncoder(queue);
-        if (!encoder) {
+        GpuCommandEncoder encoder = gpuBeginCommandEncoder(device, queue);        if (!encoder) {
             gpuSurfaceTextureRelease(backbuffer);
             continue;
         }

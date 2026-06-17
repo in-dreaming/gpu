@@ -38,6 +38,8 @@ struct GpuHandlePool {
     GpuHandlePool(const GpuHandlePool&) = delete;
     GpuHandlePool& operator=(const GpuHandlePool&) = delete;
 
+    static constexpr uint32_t capacity() { return PoolSize; }
+
     uint32_t allocate(T* ptr)
     {
         std::lock_guard<std::mutex> lock(mutex);

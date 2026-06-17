@@ -40,8 +40,19 @@ typedef struct {
 
 typedef struct GpuDevice_t* GpuDevice;
 
+typedef enum {
+    GPU_TEXTURE_VIEW_TYPE_RENDER_TARGET = 0,
+    GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL = 1,
+    GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE = 2,
+    GPU_TEXTURE_VIEW_TYPE_UNORDERED_ACCESS = 3,
+} GpuTextureViewType;
+
 GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuTextureHandle* outHandle);
 GpuResult gpuDestroyTexture(GpuDevice device, GpuTextureHandle handle);
+
+// Create a texture view for a specific usage (e.g., render target)
+GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTextureViewType type, GpuTextureHandle* outViewHandle);
+GpuResult gpuDestroyTextureView(GpuDevice device, GpuTextureHandle viewHandle);
 
 #ifdef __cplusplus
 }
