@@ -19,10 +19,14 @@ typedef enum {
     GPU_TYPE_KIND_PARAMETER_BLOCK,
 } GpuTypeKind;
 
+// Forward declaration
+struct GpuTypeInfo;
+typedef struct GpuTypeInfo GpuTypeInfo;
+
 typedef struct GpuStructField {
     char* name;
     uint32_t offset;
-    struct GpuTypeInfo* type;
+    GpuTypeInfo* type;
 } GpuStructField;
 
 struct GpuTypeInfo {
@@ -40,7 +44,7 @@ struct GpuTypeInfo {
     };
 };
 
-void gpuTypeInfoDestroy(struct GpuTypeInfo* info);
+void gpuTypeInfoDestroy(GpuTypeInfo* info);
 
 #ifdef __cplusplus
 }

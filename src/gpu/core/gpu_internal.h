@@ -7,6 +7,9 @@
 #include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_handle_pool.h"
 
+// Forward declaration
+struct GpuTensorData;
+
 struct GpuDevice_t {
     rhi::ComPtr<rhi::IDevice> rhiDevice;
     rhi::ComPtr<rhi::ICommandQueue> graphicsQueue;
@@ -18,6 +21,8 @@ struct GpuDevice_t {
     GpuHandlePool<rhi::IShaderObject> shaderObjectPool;
     GpuHandlePool<rhi::IPipeline> pipelinePool;
     GpuHandlePool<rhi::IFence> fencePool;
+    GpuHandlePool<rhi::IAccelerationStructure> accelStructPool;
+    GpuHandlePool<GpuTensorData> tensorPool;
 };
 
 struct GpuCommandEncoder_t {
@@ -28,6 +33,7 @@ struct GpuCommandEncoder_t {
 
 struct GpuCommandBuffer_t {
     rhi::ComPtr<rhi::ICommandBuffer> rhiCmdBuffer;
+    GpuDevice device;
 };
 
 struct GpuSurface_t {
@@ -55,6 +61,10 @@ struct GpuComputePipeline_t {
     rhi::ComPtr<rhi::IComputePipeline> rhiPipeline;
 };
 
+struct GpuRayTracingPipeline_t {
+    rhi::ComPtr<rhi::IRayTracingPipeline> rhiPipeline;
+};
+
 struct GpuShaderProgram_t {
     rhi::ComPtr<rhi::IShaderProgram> rhiProgram;
     rhi::ComPtr<slang::IComponentType> linkedProgram;
@@ -64,6 +74,24 @@ struct GpuShaderProgram_t {
 struct GpuShaderCompiler_t {
     GpuDevice device;
     std::string lastDiagnostic;
+};
+
+struct GpuFence_t {
+    rhi::ComPtr<rhi::IFence> rhiFence;
+};
+
+struct GpuAccelerationStructure_t {
+    rhi::ComPtr<rhi::IAccelerationStructure> rhiAS;
+};
+
+// Tensor data structure (defined here to avoid circular includes)
+struct GpuTensorData {
+    uint32_t format;        // GpuTensorFormat
+    uint32_t dimCount;
+    uint32_t dims[4];
+    uint32_t strides[4];
+    size_t bufferSize;
+    GpuBufferHandle bufferHandle;  // Handle to underlying buffer
 };
 
 static inline rhi::Format gpuFormatToRhi(GpuFormat fmt)

@@ -34,6 +34,11 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
         return GPU_ERROR_DEVICE_LOST;
     }
     device->graphicsQueue = queue;
+    
+    // slang-rhi only has Graphics queue type - the same queue handles all operations
+    // Set compute and transfer to point to the same graphics queue
+    device->computeQueue = queue;
+    device->transferQueue = queue;
 
     *outDevice = device;
     return GPU_SUCCESS;
@@ -81,9 +86,22 @@ void gpuDestroyDevice(GpuDevice device)
 GpuResult gpuGetQueue(GpuDevice device, GpuQueueType type, GpuCommandQueue* outQueue)
 {
     if (!device || !outQueue) return GPU_ERROR_INVALID_ARGS;
-    if (type != GPU_QUEUE_TYPE_GRAPHICS) return GPU_ERROR_NOT_SUPPORTED;
-    *outQueue = (GpuCommandQueue)device->graphicsQueue.get();
-    return GPU_SUCCESS;
+    
+    switch (type) {
+    case GPU_QUEUE_TYPE_GRAPHICS:
+        *outQueue = (GpuCommandQueue)device->graphicsQueue.get();
+        return GPU_SUCCESS;
+    case GPU_QUEUE_TYPE_COMPUTE:
+        if (!device->computeQueue) return GPU_ERROR_NOT_SUPPORTED;
+        *outQueue = (GpuCommandQueue)device->computeQueue.get();
+        return GPU_SUCCESS;
+    case GPU_QUEUE_TYPE_TRANSFER:
+        if (!device->transferQueue) return GPU_ERROR_NOT_SUPPORTED;
+        *outQueue = (GpuCommandQueue)device->transferQueue.get();
+        return GPU_SUCCESS;
+    default:
+        return GPU_ERROR_INVALID_ARGS;
+    }
 }
 
 GpuCommandEncoder gpuBeginCommandEncoder(GpuDevice device, GpuCommandQueue queue)
@@ -110,6 +128,7 @@ GpuCommandBuffer gpuFinishCommandEncoder(GpuCommandEncoder encoder)
 
     GpuCommandBuffer buf = new GpuCommandBuffer_t();
     buf->rhiCmdBuffer = cmdBuffer;
+    buf->device = encoder->device;
 
     delete encoder;
     return buf;

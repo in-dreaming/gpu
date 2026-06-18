@@ -1,10 +1,6 @@
 #include "gpu/sync/gpu_fence.h"
 #include "gpu/core/gpu_internal.h"
 
-struct GpuFence_t {
-    rhi::ComPtr<rhi::IFence> rhiFence;
-};
-
 GpuResult gpuCreateFence(GpuDevice device, uint64_t initialValue, GpuFence* outFence)
 {
     if (!device || !outFence) return GPU_ERROR_INVALID_ARGS;

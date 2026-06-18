@@ -19,13 +19,32 @@ set(GPU_PUBLIC_HEADERS
     resource/gpu_resource_manager.h
     resource/gpu_readback.h
     resource/gpu_streaming_manager.h
+    resource/gpu_sparse_resource.h
     shader/gpu_shader_compiler.h
     shader/gpu_slang_module.h
     shader/gpu_shader_cache.h
     reflection/gpu_type_info.h
     reflection/gpu_reflection_cache.h
     reflection/gpu_meta_gen.h
+    pipeline/gpu_pipeline_state.h
+    pipeline/gpu_pipeline_cache.h
+    pipeline/gpu_cmd_bind.h
+    pipeline/gpu_mesh_pipeline.h
+    layout/gpu_shader_object.h
+    layout/gpu_parameter_block.h
+    queue/gpu_multi_queue.h
     bindless/gpu_bindless_heap.h
+    # Phase 3 - Capability
+    capability/gpu_feature_gating.h
+    capability/gpu_fallback_registry.h
+    # Phase 3 - AI
+    ai/gpu_tensor.h
+    ai/gpu_matrix_pipeline.h
+    ai/gpu_neural.h
+    # Phase 3 - Work Graph
+    workgraph/gpu_work_graph.h
+    # Phase 3 - Ray Tracing
+    raytracing/gpu_raytracing.h
 )
 
 set(GPU_SOURCES
@@ -46,14 +65,33 @@ set(GPU_SOURCES
     resource/gpu_resource_manager.cpp
     resource/gpu_readback.cpp
     resource/gpu_streaming_manager.cpp
+    resource/gpu_sparse_resource.cpp
     shader/gpu_shader_compiler.cpp
     shader/gpu_slang_module.cpp
     shader/gpu_shader_cache.cpp
     reflection/gpu_type_info.cpp
     reflection/gpu_reflection_cache.cpp
     reflection/gpu_meta_gen.cpp
+    pipeline/gpu_pipeline_state.cpp
+    pipeline/gpu_pipeline_cache.cpp
+    pipeline/gpu_cmd_bind.cpp
+    pipeline/gpu_mesh_pipeline.cpp
+    layout/gpu_parameter_block.cpp
+    layout/gpu_shader_object.cpp
+    queue/gpu_multi_queue.cpp
     bindless/gpu_bindless_heap.cpp
     bindless/gpu_descriptor_alloc.h
+    # Phase 3 - Capability
+    capability/gpu_feature_gating.cpp
+    capability/gpu_fallback_registry.cpp
+    # Phase 3 - AI
+    ai/gpu_tensor.cpp
+    ai/gpu_matrix_pipeline.cpp
+    ai/gpu_neural.cpp
+    # Phase 3 - Work Graph
+    workgraph/gpu_work_graph.cpp
+    # Phase 3 - Ray Tracing
+    raytracing/gpu_raytracing.cpp
 )
 
 add_library(gpu STATIC ${GPU_PUBLIC_HEADERS} ${GPU_SOURCES})

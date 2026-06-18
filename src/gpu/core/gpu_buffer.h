@@ -19,6 +19,7 @@ typedef uint32_t GpuBufferUsage;
 #define GPU_BUFFER_USAGE_COPY_SOURCE            (1u << 6)
 #define GPU_BUFFER_USAGE_COPY_DEST              (1u << 7)
 #define GPU_BUFFER_USAGE_ACCELERATION_STRUCTURE (1u << 8)
+#define GPU_BUFFER_USAGE_SPARSE                 (1u << 9)
 
 typedef struct {
     uint64_t size;
@@ -32,6 +33,12 @@ typedef struct GpuDevice_t* GpuDevice;
 GpuResult gpuCreateBuffer(GpuDevice device, const GpuBufferDesc* desc, GpuBufferHandle* outHandle);
 GpuResult gpuCreateBufferInit(GpuDevice device, const GpuBufferDesc* desc, const void* initData, GpuBufferHandle* outHandle);
 GpuResult gpuDestroyBuffer(GpuDevice device, GpuBufferHandle handle);
+
+// Upload data to existing buffer (maps buffer, copies data, unmaps)
+GpuResult gpuUploadToBuffer(GpuDevice device, GpuBufferHandle buffer, const void* data, size_t size, uint64_t offset);
+
+// Download data from existing buffer (maps buffer, copies data, unmaps)
+GpuResult gpuDownloadFromBuffer(GpuDevice device, GpuBufferHandle buffer, void* outData, size_t size, uint64_t offset);
 
 #ifdef __cplusplus
 }

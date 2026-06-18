@@ -16,7 +16,11 @@ typedef GpuHandle GpuTextureHandle;
 typedef GpuHandle GpuShaderObjectHandle;
 typedef GpuHandle GpuPipelineHandle;
 
+#ifdef __cplusplus
+#define GPU_NULL_HANDLE GpuHandle{0, 0}
+#else
 #define GPU_NULL_HANDLE ((GpuHandle){0, 0})
+#endif
 
 static inline bool gpuHandleIsValid(GpuHandle h)
 {

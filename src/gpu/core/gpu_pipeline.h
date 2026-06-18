@@ -18,6 +18,7 @@ typedef enum {
     GPU_PRIMITIVE_TOPOLOGY_LINE_LIST     = 1,
     GPU_PRIMITIVE_TOPOLOGY_POINT_LIST    = 2,
     GPU_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP = 3,
+    GPU_PRIMITIVE_TOPOLOGY_LINE_STRIP    = 4,
 } GpuPrimitiveTopology;
 
 typedef struct {

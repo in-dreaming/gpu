@@ -17,6 +17,7 @@ typedef uint32_t GpuTextureUsage;
 #define GPU_TEXTURE_USAGE_PRESENT           (1u << 4)
 #define GPU_TEXTURE_USAGE_COPY_SOURCE       (1u << 5)
 #define GPU_TEXTURE_USAGE_COPY_DEST         (1u << 6)
+#define GPU_TEXTURE_USAGE_SPARSE            (1u << 7)
 
 typedef enum {
     GPU_TEXTURE_TYPE_1D = 0,
