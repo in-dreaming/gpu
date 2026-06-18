@@ -1,3 +1,6 @@
+#ifdef _MSC_VER
+#pragma warning(disable : 4996)
+#endif
 #include "gpu/pipeline/gpu_pipeline_cache.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/pipeline/gpu_pipeline_state.h"
@@ -229,10 +232,36 @@ GpuResult gpuCreatePipelineCache(GpuDevice device, const GpuPipelineCacheDesc* d
     cache->entryCount = 0;
     cache->hitCount = 0;
     cache->missCount = 0;
-    
-    // TODO: Load initial cache data if provided
+
+    if (cache->cachePath) {
+        FILE* f = fopen(cache->cachePath, "rb");
+        if (f) {
+            uint32_t magic, count;
+            if (fread(&magic, sizeof(uint32_t), 1, f) == 1 && magic == 0x47504343) {
+                if (fread(&count, sizeof(uint32_t), 1, f) == 1) {
+                    for (uint32_t i = 0; i < count; i++) {
+                        struct GpuPipelineCacheEntry* entry =
+                            (struct GpuPipelineCacheEntry*)malloc(sizeof(struct GpuPipelineCacheEntry));
+                        if (!entry) break;
+                        if (fread(entry->hash, 1, GPU_SHA256_HASH_SIZE, f) != GPU_SHA256_HASH_SIZE) {
+                            free(entry);
+                            break;
+                        }
+                        if (fread(&entry->pipeline, sizeof(GpuPipelineHandle), 1, f) != 1) {
+                            free(entry);
+                            break;
+                        }
+                        entry->next = cache->entries;
+                        cache->entries = entry;
+                        cache->entryCount++;
+                    }
+                }
+            }
+            fclose(f);
+        }
+    }
+
     (void)device;
-    (void)desc;
     
     *outCache = cache;
     return GPU_OK;
@@ -315,10 +344,32 @@ GpuResult gpuPipelineCacheFlush(GpuPipelineCache cache) {
     if (!cache) {
         return GPU_ERROR_INVALID_PARAMETER;
     }
-    
-    // TODO: Implement disk serialization
-    // This would write the cache entries to the file specified by cachePath
-    
+
+    if (!cache->cachePath) {
+        return GPU_OK;
+    }
+
+    size_t dataSize = 0;
+    void* data = NULL;
+    GpuResult res = gpuGetPipelineCacheData(cache, &dataSize, &data);
+    if (res != GPU_OK || !data || dataSize == 0) {
+        return res;
+    }
+
+    FILE* f = fopen(cache->cachePath, "wb");
+    if (!f) {
+        gpuFreePipelineCacheData(data);
+        return GPU_ERROR_INTERNAL;
+    }
+
+    size_t written = fwrite(data, 1, dataSize, f);
+    fclose(f);
+    gpuFreePipelineCacheData(data);
+
+    if (written != dataSize) {
+        return GPU_ERROR_INTERNAL;
+    }
+
     return GPU_OK;
 }
 
@@ -330,11 +381,39 @@ GpuResult gpuGetPipelineCacheData(GpuPipelineCache cache, size_t* outSize, void*
     if (!cache || !outSize || !outData) {
         return GPU_ERROR_INVALID_PARAMETER;
     }
-    
-    // TODO: Serialize cache data for disk storage
-    *outSize = 0;
-    *outData = NULL;
-    
+
+    size_t totalSize = sizeof(uint32_t);
+    totalSize += sizeof(uint32_t);
+
+    struct GpuPipelineCacheEntry* entry = cache->entries;
+    while (entry) {
+        totalSize += GPU_SHA256_HASH_SIZE;
+        totalSize += sizeof(GpuPipelineHandle);
+        entry = entry->next;
+    }
+
+    uint8_t* buf = (uint8_t*)malloc(totalSize);
+    if (!buf) {
+        *outSize = 0;
+        *outData = NULL;
+        return GPU_ERROR_OUT_OF_MEMORY;
+    }
+
+    uint32_t magic = 0x47504343;
+    uint32_t count = cache->entryCount;
+    size_t off = 0;
+    memcpy(buf + off, &magic, sizeof(uint32_t)); off += sizeof(uint32_t);
+    memcpy(buf + off, &count, sizeof(uint32_t)); off += sizeof(uint32_t);
+
+    entry = cache->entries;
+    while (entry) {
+        memcpy(buf + off, entry->hash, GPU_SHA256_HASH_SIZE); off += GPU_SHA256_HASH_SIZE;
+        memcpy(buf + off, &entry->pipeline, sizeof(GpuPipelineHandle)); off += sizeof(GpuPipelineHandle);
+        entry = entry->next;
+    }
+
+    *outSize = totalSize;
+    *outData = buf;
     return GPU_OK;
 }
 

@@ -196,8 +196,7 @@ GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipeline);
 struct GpuShaderProgram_t;
 typedef struct GpuShaderProgram_t* GpuShaderProgram;
 GpuResult gpuCreateComputePipelineFromProgram(GpuDevice device, GpuShaderProgram program, const char* label, GpuPipelineHandle* outPipeline);
-
-// Get pipeline type for validation
+GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipeline);
 GpuPipelineType gpuGetPipelineType(GpuDevice device, GpuPipelineHandle pipeline);
 
 #ifdef __cplusplus

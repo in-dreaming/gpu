@@ -1,8 +1,12 @@
 #include "gpu/layout/gpu_shader_object.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/reflection/gpu_type_info.h"
+#include "gpu/pipeline/gpu_pipeline_state.h"
+#include <slang-rhi.h>
 #include <string.h>
 #include <stdlib.h>
+
+extern rhi::IComputePipeline* gpuResolveComputePipeline(GpuDevice device, GpuPipelineHandle pipeline);
 
 // Shader object implementation
 struct GpuShaderObject_t {
@@ -213,15 +217,18 @@ void gpuCmdBindShaderObject(GpuCommandBuffer cmd, GpuShaderObjectHandle handle) 
     gpuCmdBindShaderObjectAt(cmd, 0, handle);
 }
 
-void gpuCmdBindShaderObjectAt(GpuCommandBuffer cmd, uint32_t setIndex, GpuShaderObjectHandle handle) {
+void gpuCmdBindShaderObjectAt(GpuCommandBuffer cmd, uint32_t /*setIndex*/, GpuShaderObjectHandle handle) {
     if (!cmd || !gpuHandleIsValid(handle)) return;
-    
+
     GpuShaderObject_t* obj = g_shaderObjectPool.resolve(handle.index, handle.generation);
     if (!obj) return;
-    
-    // This would set up the shader object binding at the specified set index
-    // Actual implementation depends on RHI integration
-    (void)setIndex;
+
+    if (cmd->inComputePass && cmd->computePassEncoder && obj->pipeline.index) {
+        rhi::IComputePipeline* pipe = gpuResolveComputePipeline(cmd->device, obj->pipeline);
+        if (pipe) {
+            cmd->computePassEncoder->bindPipeline(pipe);
+        }
+    }
 }
 
 // ============================================================================

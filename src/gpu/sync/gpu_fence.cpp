@@ -1,6 +1,21 @@
 #include "gpu/sync/gpu_fence.h"
 #include "gpu/core/gpu_internal.h"
 
+static void finalizeCmdBuf(GpuCommandBuffer_t* buf) {
+    if (!buf) return;
+    if (buf->inComputePass && buf->computePassEncoder) {
+        buf->computePassEncoder->end();
+        buf->inComputePass = false;
+        buf->computePassEncoder = nullptr;
+    }
+    if (buf->rhiEncoder) {
+        rhi::ComPtr<rhi::ICommandBuffer> cmdBuffer;
+        buf->rhiEncoder->finish(cmdBuffer.writeRef());
+        buf->rhiCmdBuffer = cmdBuffer;
+        buf->rhiEncoder = nullptr;
+    }
+}
+
 GpuResult gpuCreateFence(GpuDevice device, uint64_t initialValue, GpuFence* outFence)
 {
     if (!device || !outFence) return GPU_ERROR_INVALID_ARGS;
@@ -65,7 +80,12 @@ GpuResult gpuQueueSubmitWithFence(GpuCommandQueue queue, uint32_t cmdCount,
             continue;
         }
         GpuCommandBuffer_t* buf = static_cast<GpuCommandBuffer_t*>(cmds[i]);
-        rhiBuffers[i] = buf->rhiCmdBuffer.get();
+        finalizeCmdBuf(buf);
+        if (buf->rhiCmdBuffer) {
+            rhiBuffers[i] = buf->rhiCmdBuffer.get();
+        } else {
+            rhiBuffers[i] = nullptr;
+        }
         wrappers[i] = buf;
     }
 

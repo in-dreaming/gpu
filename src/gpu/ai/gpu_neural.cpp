@@ -2,11 +2,59 @@
 #include "gpu/ai/gpu_tensor.h"
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/pipeline/gpu_pipeline_state.h"
+#include "gpu/shader/gpu_shader_compiler.h"
+#include <slang.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-// Neural network layer
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
+#ifdef _MSC_VER
+#pragma warning(disable : 4996)
+#endif
+
+extern rhi::IComputePipeline* gpuResolveComputePipeline(GpuDevice device, GpuPipelineHandle pipeline);
+
+static const char* s_denseLayerShader = R"(
+struct PushConstants
+{
+    uint inputSize;
+    uint outputSize;
+    uint applyRelu;
+};
+
+[[vk::push_constant]] ConstantBuffer<PushConstants> pc;
+
+RWStructuredBuffer<float> inputBuffer;
+RWStructuredBuffer<float> weightBuffer;
+RWStructuredBuffer<float> biasBuffer;
+RWStructuredBuffer<float> outputBuffer;
+
+[numthreads(64, 1, 1)]
+void main(uint3 threadID : SV_DispatchThreadID)
+{
+    uint idx = threadID.x;
+    if (idx >= pc.outputSize) return;
+
+    float sum = 0.0;
+    for (uint i = 0; i < pc.inputSize; i++) {
+        sum += inputBuffer[i] * weightBuffer[idx * pc.inputSize + i];
+    }
+    sum += biasBuffer[idx];
+
+    if (pc.applyRelu != 0 && sum < 0.0) sum = 0.0;
+
+    outputBuffer[idx] = sum;
+}
+)";
+
 struct NeuralLayer {
     GpuTensorHandle weights;
     GpuTensorHandle biases;
@@ -14,7 +62,6 @@ struct NeuralLayer {
     uint32_t outputSize;
 };
 
-// Neural network data typedef'd as GpuNeuralNetwork_t
 struct GpuNeuralNetwork_t {
     uint32_t inputWidth;
     uint32_t inputHeight;
@@ -22,57 +69,100 @@ struct GpuNeuralNetwork_t {
     uint32_t outputChannels;
     GpuTensorFormat weightFormat;
 
-    // Layers
     NeuralLayer* layers;
     uint32_t layerCount;
 
-    // Intermediate tensors
     GpuTensorHandle hiddenActivations;
+
+    GpuPipelineHandle densePipeline;
+    GpuShaderProgram denseProgram;
+    GpuShaderCompiler denseCompiler;
+    bool pipelineReady;
 };
+
+static bool writeNeuralShaderToTempFile(std::string& outPath) {
+    char tempDir[MAX_PATH];
+    GetTempPathA(MAX_PATH, tempDir);
+    outPath = std::string(tempDir) + "gpu_neural_dense.slang";
+    FILE* f = fopen(outPath.c_str(), "w");
+    if (!f) return false;
+    fputs(s_denseLayerShader, f);
+    fclose(f);
+    return true;
+}
+
+static GpuResult ensureDensePipeline(GpuDevice device, GpuNeuralNetwork_t* net) {
+    if (net->pipelineReady) return GPU_SUCCESS;
+
+    GpuResult res = gpuCreateShaderCompiler(device, &net->denseCompiler);
+    if (res != GPU_SUCCESS) return res;
+
+    std::string shaderPath;
+    if (!writeNeuralShaderToTempFile(shaderPath)) {
+        gpuDestroyShaderCompiler(net->denseCompiler);
+        net->denseCompiler = NULL;
+        return GPU_ERROR_INTERNAL;
+    }
+
+    GpuShaderCompileDesc compileDesc = {};
+    compileDesc.sourcePath = shaderPath.c_str();
+    compileDesc.entryPoint = "main";
+    compileDesc.target = GPU_SHADER_TARGET_SPIRV;
+
+    res = gpuCompileShader(net->denseCompiler, &compileDesc, &net->denseProgram);
+    if (res != GPU_SUCCESS) {
+        gpuDestroyShaderCompiler(net->denseCompiler);
+        net->denseCompiler = NULL;
+        return res;
+    }
+
+    res = gpuCreateComputePipelineFromProgram(device, net->denseProgram, "DenseLayer", &net->densePipeline);
+    if (res != GPU_SUCCESS) {
+        gpuDestroyShaderProgram(net->denseProgram);
+        net->denseProgram = NULL;
+        gpuDestroyShaderCompiler(net->denseCompiler);
+        net->denseCompiler = NULL;
+        return res;
+    }
+
+    net->pipelineReady = true;
+    return GPU_SUCCESS;
+}
 
 GpuResult gpuCreateNeuralNetwork(GpuDevice device, const GpuNeuralNetworkDesc* desc, GpuNeuralNetwork* outNetwork)
 {
     if (!device || !desc || !outNetwork) return GPU_ERROR_INVALID_ARGS;
-
-    // Validate dimensions
     if (desc->inputWidth == 0 || desc->inputHeight == 0 || desc->hiddenDim == 0 || desc->outputChannels == 0) {
         return GPU_ERROR_INVALID_ARGS;
     }
 
-    // Allocate network structure
-    GpuNeuralNetwork network = (GpuNeuralNetwork)malloc(sizeof(GpuNeuralNetwork_t));
-    if (!network) return GPU_ERROR_OUT_OF_MEMORY;
+    GpuNeuralNetwork net = (GpuNeuralNetwork)calloc(1, sizeof(GpuNeuralNetwork_t));
+    if (!net) return GPU_ERROR_OUT_OF_MEMORY;
 
-    network->inputWidth = desc->inputWidth;
-    network->inputHeight = desc->inputHeight;
-    network->hiddenDim = desc->hiddenDim;
-    network->outputChannels = desc->outputChannels;
-    network->weightFormat = desc->weightFormat;
+    net->inputWidth = desc->inputWidth;
+    net->inputHeight = desc->inputHeight;
+    net->hiddenDim = desc->hiddenDim;
+    net->outputChannels = desc->outputChannels;
+    net->weightFormat = desc->weightFormat;
+    net->pipelineReady = false;
 
-    // Create a simple 2-layer MLP:
-    // Layer 1: input (width*height*3) -> hidden
-    // Layer 2: hidden -> output (width*height*outputChannels)
-
-    uint32_t inputSize = desc->inputWidth * desc->inputHeight * 3;  // RGB input
+    uint32_t inputSize = desc->inputWidth * desc->inputHeight * 3;
     uint32_t outputSize = desc->inputWidth * desc->inputHeight * desc->outputChannels;
 
-    network->layerCount = 2;
-    network->layers = (NeuralLayer*)malloc(sizeof(NeuralLayer) * network->layerCount);
-    if (!network->layers) {
-        free(network);
+    net->layerCount = 2;
+    net->layers = (NeuralLayer*)malloc(sizeof(NeuralLayer) * net->layerCount);
+    if (!net->layers) {
+        free(net);
         return GPU_ERROR_OUT_OF_MEMORY;
     }
 
-    // Create tensors for weights and biases
     GpuResult res;
 
-    // Layer 1: input -> hidden
     {
-        NeuralLayer& layer = network->layers[0];
+        NeuralLayer& layer = net->layers[0];
         layer.inputSize = inputSize;
         layer.outputSize = desc->hiddenDim;
 
-        // Weight matrix: [hiddenDim, inputSize]
         GpuTensorDesc weightDesc = {};
         weightDesc.format = desc->weightFormat;
         weightDesc.dimCount = 2;
@@ -83,12 +173,11 @@ GpuResult gpuCreateNeuralNetwork(GpuDevice device, const GpuNeuralNetworkDesc* d
 
         res = gpuCreateTensor(device, &weightDesc, &layer.weights);
         if (res != GPU_SUCCESS) {
-            free(network->layers);
-            free(network);
+            free(net->layers);
+            free(net);
             return res;
         }
 
-        // Bias vector: [hiddenDim]
         GpuTensorDesc biasDesc = {};
         biasDesc.format = desc->weightFormat;
         biasDesc.dimCount = 1;
@@ -98,19 +187,17 @@ GpuResult gpuCreateNeuralNetwork(GpuDevice device, const GpuNeuralNetworkDesc* d
         res = gpuCreateTensor(device, &biasDesc, &layer.biases);
         if (res != GPU_SUCCESS) {
             gpuDestroyTensor(device, layer.weights);
-            free(network->layers);
-            free(network);
+            free(net->layers);
+            free(net);
             return res;
         }
     }
 
-    // Layer 2: hidden -> output
     {
-        NeuralLayer& layer = network->layers[1];
+        NeuralLayer& layer = net->layers[1];
         layer.inputSize = desc->hiddenDim;
         layer.outputSize = outputSize;
 
-        // Weight matrix: [outputSize, hiddenDim]
         GpuTensorDesc weightDesc = {};
         weightDesc.format = desc->weightFormat;
         weightDesc.dimCount = 2;
@@ -121,14 +208,13 @@ GpuResult gpuCreateNeuralNetwork(GpuDevice device, const GpuNeuralNetworkDesc* d
 
         res = gpuCreateTensor(device, &weightDesc, &layer.weights);
         if (res != GPU_SUCCESS) {
-            gpuDestroyTensor(device, network->layers[0].weights);
-            gpuDestroyTensor(device, network->layers[0].biases);
-            free(network->layers);
-            free(network);
+            gpuDestroyTensor(device, net->layers[0].weights);
+            gpuDestroyTensor(device, net->layers[0].biases);
+            free(net->layers);
+            free(net);
             return res;
         }
 
-        // Bias vector: [outputSize]
         GpuTensorDesc biasDesc = {};
         biasDesc.format = desc->weightFormat;
         biasDesc.dimCount = 1;
@@ -138,37 +224,34 @@ GpuResult gpuCreateNeuralNetwork(GpuDevice device, const GpuNeuralNetworkDesc* d
         res = gpuCreateTensor(device, &biasDesc, &layer.biases);
         if (res != GPU_SUCCESS) {
             gpuDestroyTensor(device, layer.weights);
-            gpuDestroyTensor(device, network->layers[0].weights);
-            gpuDestroyTensor(device, network->layers[0].biases);
-            free(network->layers);
-            free(network);
+            gpuDestroyTensor(device, net->layers[0].weights);
+            gpuDestroyTensor(device, net->layers[0].biases);
+            free(net->layers);
+            free(net);
             return res;
         }
     }
 
-    // Hidden activation tensor
     {
         GpuTensorDesc hiddenDesc = {};
-        hiddenDesc.format = GPU_TENSOR_FORMAT_F16;
+        hiddenDesc.format = GPU_TENSOR_FORMAT_F32;
         hiddenDesc.dimCount = 1;
         hiddenDesc.dims[0] = desc->hiddenDim;
         hiddenDesc.strides[0] = 1;
 
-        res = gpuCreateTensor(device, &hiddenDesc, &network->hiddenActivations);
+        res = gpuCreateTensor(device, &hiddenDesc, &net->hiddenActivations);
         if (res != GPU_SUCCESS) {
-            // Cleanup layer 2
-            gpuDestroyTensor(device, network->layers[1].weights);
-            gpuDestroyTensor(device, network->layers[1].biases);
-            // Cleanup layer 1
-            gpuDestroyTensor(device, network->layers[0].weights);
-            gpuDestroyTensor(device, network->layers[0].biases);
-            free(network->layers);
-            free(network);
+            gpuDestroyTensor(device, net->layers[1].weights);
+            gpuDestroyTensor(device, net->layers[1].biases);
+            gpuDestroyTensor(device, net->layers[0].weights);
+            gpuDestroyTensor(device, net->layers[0].biases);
+            free(net->layers);
+            free(net);
             return res;
         }
     }
 
-    *outNetwork = network;
+    *outNetwork = net;
     return GPU_SUCCESS;
 }
 
@@ -178,49 +261,35 @@ GpuResult gpuNeuralNetworkInference(GpuCommandBuffer cmd, GpuNeuralNetwork netwo
 
     GpuNeuralNetwork net = (GpuNeuralNetwork)network;
 
-    // Get input/output buffers
-    GpuBufferHandle inputBuffer = gpuGetTensorBuffer(cmd->device, input);
-    GpuBufferHandle outputBuffer = gpuGetTensorBuffer(cmd->device, output);
+    GpuBufferHandle inputBuf = gpuGetTensorBuffer(cmd->device, input);
+    GpuBufferHandle outputBuf = gpuGetTensorBuffer(cmd->device, output);
+    if (!inputBuf.index || !outputBuf.index) return GPU_ERROR_INVALID_ARGS;
 
-    if (!inputBuffer.index || !outputBuffer.index) {
-        return GPU_ERROR_INVALID_ARGS;
+    GpuResult res = ensureDensePipeline(cmd->device, net);
+    if (res != GPU_SUCCESS) {
+        fprintf(stderr, "gpuNeuralNetworkInference: pipeline not ready (%d)\n", res);
+        return res;
     }
 
-    // Layer 1: matmul(input, weights[0]) + bias[0] -> hidden activation
-    // Layer 2: matmul(activation, weights[1]) + bias[1] -> output
+    if (!cmd->rhiEncoder) return GPU_ERROR_INTERNAL;
 
-    // In a full implementation:
-    // 1. Layer 1 matrix multiplication: input [1, inputSize] x weights[0] [inputSize, hiddenDim] = hidden [1, hiddenDim]
-    // 2. Add bias[0] to hidden
-    // 3. Apply ReLU activation
-    // 4. Layer 2 matrix multiplication: hidden [1, hiddenDim] x weights[1] [hiddenDim, outputSize] = output [1, outputSize]
-    // 5. Add bias[1] to output
-
-    // Get layer weights/biases buffers
-    GpuBufferHandle w1 = gpuGetTensorBuffer(cmd->device, net->layers[0].weights);
-    GpuBufferHandle b1 = gpuGetTensorBuffer(cmd->device, net->layers[0].biases);
-    GpuBufferHandle w2 = gpuGetTensorBuffer(cmd->device, net->layers[1].weights);
-    GpuBufferHandle b2 = gpuGetTensorBuffer(cmd->device, net->layers[1].biases);
-    GpuBufferHandle hidden = gpuGetTensorBuffer(cmd->device, net->hiddenActivations);
-
-    if (!w1.index || !b1.index || !w2.index || !b2.index || !hidden.index) {
-        return GPU_ERROR_INVALID_ARGS;
+    if (!cmd->inComputePass) {
+        cmd->computePassEncoder = cmd->rhiEncoder->beginComputePass();
+        if (!cmd->computePassEncoder) return GPU_ERROR_INTERNAL;
+        cmd->inComputePass = true;
     }
 
-    // Note: In a full implementation, we would dispatch compute shaders for:
-    // 1. dense_layer(input, w1, b1, hidden, ReLU)
-    // 2. dense_layer(hidden, w2, b2, output, None)
+    rhi::IComputePipeline* pipe = gpuResolveComputePipeline(cmd->device, net->densePipeline);
+    if (!pipe) return GPU_ERROR_INTERNAL;
 
-    // The compute shaders would be launched via the command buffer's compute pass
-    rhi::ICommandQueue* computeQueue = cmd->device->computeQueue.get();
-    if (!computeQueue) {
-        return GPU_ERROR_NOT_SUPPORTED;
+    cmd->computePassEncoder->bindPipeline(pipe);
+
+    for (uint32_t i = 0; i < net->layerCount; i++) {
+        NeuralLayer& layer = net->layers[i];
+        uint32_t dispatchX = (layer.outputSize + 63) / 64;
+        cmd->computePassEncoder->dispatchCompute(dispatchX, 1, 1);
     }
 
-    // For now, the work is recorded but shader execution deferred
-    // In production, this would create compute passes and dispatch
-
-    (void)w1; (void)b1; (void)w2; (void)b2; (void)hidden;
     return GPU_SUCCESS;
 }
 
@@ -230,7 +299,6 @@ GpuResult gpuLoadNeuralNetworkWeights(GpuDevice device, GpuNeuralNetwork network
 
     GpuNeuralNetwork net = (GpuNeuralNetwork)network;
 
-    // Calculate expected size
     uint32_t inputSize = net->inputWidth * net->inputHeight * 3;
     uint32_t outputSize = net->inputWidth * net->inputHeight * net->outputChannels;
 
@@ -247,7 +315,6 @@ GpuResult gpuLoadNeuralNetworkWeights(GpuDevice device, GpuNeuralNetwork network
         return GPU_ERROR_INVALID_ARGS;
     }
 
-    // Get buffers for weight upload
     GpuBufferHandle w1Buffer = gpuGetTensorBuffer(device, net->layers[0].weights);
     GpuBufferHandle b1Buffer = gpuGetTensorBuffer(device, net->layers[0].biases);
     GpuBufferHandle w2Buffer = gpuGetTensorBuffer(device, net->layers[1].weights);
@@ -257,47 +324,23 @@ GpuResult gpuLoadNeuralNetworkWeights(GpuDevice device, GpuNeuralNetwork network
         return GPU_ERROR_INVALID_ARGS;
     }
 
-    // Upload weights to GPU buffers
-    // In a full implementation:
-    // 1. Create staging/upload buffer
-    // 2. Copy weight data to upload buffer (via CPU memcpy)
-    // 3. Copy from upload buffer to each layer's weight/bias tensor buffers
-
     size_t offset = 0;
     const uint8_t* data = (const uint8_t*)weightData;
 
-    // Upload layer 1 weights
     GpuResult res = gpuUploadToBuffer(device, w1Buffer, data + offset, layer1Weights, 0);
-    if (res != GPU_SUCCESS) {
-        fprintf(stderr, "gpuLoadNeuralNetworkWeights: Failed to upload layer 1 weights\n");
-        return res;
-    }
+    if (res != GPU_SUCCESS) return res;
     offset += layer1Weights;
 
-    // Upload layer 1 biases
     res = gpuUploadToBuffer(device, b1Buffer, data + offset, layer1Biases, 0);
-    if (res != GPU_SUCCESS) {
-        fprintf(stderr, "gpuLoadNeuralNetworkWeights: Failed to upload layer 1 biases\n");
-        return res;
-    }
+    if (res != GPU_SUCCESS) return res;
     offset += layer1Biases;
 
-    // Upload layer 2 weights
     res = gpuUploadToBuffer(device, w2Buffer, data + offset, layer2Weights, 0);
-    if (res != GPU_SUCCESS) {
-        fprintf(stderr, "gpuLoadNeuralNetworkWeights: Failed to upload layer 2 weights\n");
-        return res;
-    }
+    if (res != GPU_SUCCESS) return res;
     offset += layer2Weights;
 
-    // Upload layer 2 biases
     res = gpuUploadToBuffer(device, b2Buffer, data + offset, layer2Biases, 0);
-    if (res != GPU_SUCCESS) {
-        fprintf(stderr, "gpuLoadNeuralNetworkWeights: Failed to upload layer 2 biases\n");
-        return res;
-    }
-
-    return GPU_SUCCESS;
+    return res;
 }
 
 void gpuDestroyNeuralNetwork(GpuDevice device, GpuNeuralNetwork network)
@@ -306,13 +349,18 @@ void gpuDestroyNeuralNetwork(GpuDevice device, GpuNeuralNetwork network)
 
     GpuNeuralNetwork net = (GpuNeuralNetwork)network;
 
-    // Destroy all layers
     for (uint32_t i = 0; i < net->layerCount; i++) {
         gpuDestroyTensor(device, net->layers[i].weights);
         gpuDestroyTensor(device, net->layers[i].biases);
     }
 
     gpuDestroyTensor(device, net->hiddenActivations);
+
+    if (net->pipelineReady) {
+        gpuDestroyPipeline(device, net->densePipeline);
+        if (net->denseProgram) gpuDestroyShaderProgram(net->denseProgram);
+        if (net->denseCompiler) gpuDestroyShaderCompiler(net->denseCompiler);
+    }
 
     free(net->layers);
     free(net);

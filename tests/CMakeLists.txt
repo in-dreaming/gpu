@@ -44,3 +44,5 @@ endfunction()
 
 add_gpu_test(smoke)
 add_gpu_test(phase1)
+add_gpu_test(phase2)
+add_gpu_test(phase3)

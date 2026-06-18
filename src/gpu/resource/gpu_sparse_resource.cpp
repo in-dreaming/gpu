@@ -6,6 +6,7 @@
 // Sparse Resource (Header-only stubs - full implementation pending slang-rhi support)
 // ============================================================================
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuGetSparseTextureProperties(GpuDevice device,
                                                     GpuFormat format,
                                                     uint32_t width,
@@ -25,6 +26,7 @@ extern "C" GpuResult gpuGetSparseTextureProperties(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseReserve(GpuDevice device,
                                        GpuTextureHandle texture,
                                        uint32_t tileCount,
@@ -36,6 +38,7 @@ extern "C" GpuResult gpuSparseReserve(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseRelease(GpuDevice device,
                                        GpuTextureHandle texture,
                                        uint32_t tileCount,
@@ -47,6 +50,7 @@ extern "C" GpuResult gpuSparseRelease(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseMap(GpuDevice device,
                                    GpuTextureHandle texture,
                                    const GpuSparseTileCoord* tile,
@@ -60,6 +64,7 @@ extern "C" GpuResult gpuSparseMap(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseUnmap(GpuDevice device,
                                      GpuTextureHandle texture,
                                      const GpuSparseTileCoord* tile) {
@@ -69,6 +74,7 @@ extern "C" GpuResult gpuSparseUnmap(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseMapMultiple(GpuDevice device,
                                            GpuTextureHandle texture,
                                            uint32_t tileCount,
@@ -84,6 +90,7 @@ extern "C" GpuResult gpuSparseMapMultiple(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuGetSparseBufferProperties(GpuDevice device,
                                                    uint64_t size,
                                                    uint32_t* outPageSize,
@@ -95,6 +102,7 @@ extern "C" GpuResult gpuGetSparseBufferProperties(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuCreateSparseBuffer(GpuDevice device,
                                             uint64_t size,
                                             uint32_t usage,
@@ -106,6 +114,7 @@ extern "C" GpuResult gpuCreateSparseBuffer(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseBufferMap(GpuDevice device,
                                          GpuBufferHandle sparseBuffer,
                                          uint64_t pageIndex,
@@ -119,6 +128,7 @@ extern "C" GpuResult gpuSparseBufferMap(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseBufferUnmap(GpuDevice device,
                                            GpuBufferHandle sparseBuffer,
                                            uint64_t pageIndex) {
@@ -128,6 +138,7 @@ extern "C" GpuResult gpuSparseBufferUnmap(GpuDevice device,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseCalcTileCoord(GpuTextureHandle texture,
                                              uint32_t mipLevel,
                                              uint32_t x,
@@ -143,6 +154,7 @@ extern "C" GpuResult gpuSparseCalcTileCoord(GpuTextureHandle texture,
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" uint32_t gpuSparseCalcTileCount(GpuTextureHandle texture,
                                             uint32_t mipLevel,
                                             uint32_t width,
@@ -156,6 +168,7 @@ extern "C" uint32_t gpuSparseCalcTileCount(GpuTextureHandle texture,
     return 0;
 }
 
+// TODO: STUB - pending slang-rhi sparse resource API (Phase 2)
 extern "C" GpuResult gpuSparseGetTextureStats(GpuDevice device,
                                                GpuTextureHandle texture,
                                                GpuSparseTextureStats* outStats) {

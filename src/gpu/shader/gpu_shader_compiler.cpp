@@ -75,9 +75,33 @@ GpuResult gpuCompileShader(GpuShaderCompiler compiler, const GpuShaderCompileDes
         return GPU_ERROR_INTERNAL;
     }
 
+    rhi::ComPtr<slang::IComponentType> linkedProgram;
+    {
+        slang::IComponentType* components[] = {modulePtr.get(), entryPoint.get()};
+        if (fragmentEntryPoint) {
+            slang::IComponentType* allComponents[] = {modulePtr.get(), entryPoint.get(), fragmentEntryPoint.get()};
+            rhi::ComPtr<slang::IBlob> linkDiag;
+            slangSession->createCompositeComponentType(allComponents, 3, linkedProgram.writeRef(), linkDiag.writeRef());
+        } else {
+            rhi::ComPtr<slang::IBlob> linkDiag;
+            slangSession->createCompositeComponentType(components, 2, linkedProgram.writeRef(), linkDiag.writeRef());
+        }
+    }
+
     GpuShaderProgram program = new GpuShaderProgram_t();
     program->rhiProgram = rhiProgram;
-    // Note: we don't store the compiled data since we're using the RHI program directly
+    program->linkedProgram = linkedProgram;
+
+    if (linkedProgram) {
+        rhi::ComPtr<slang::IBlob> codeBlob;
+        rhi::ComPtr<slang::IBlob> diagBlob;
+        SlangResult compileRes = linkedProgram->getEntryPointCode(0, 0, codeBlob.writeRef(), diagBlob.writeRef());
+        if (SLANG_SUCCEEDED(compileRes) && codeBlob) {
+            const uint8_t* codeData = static_cast<const uint8_t*>(codeBlob->getBufferPointer());
+            size_t codeSize = codeBlob->getBufferSize();
+            program->compiledData.assign(codeData, codeData + codeSize);
+        }
+    }
 
     *outProgram = program;
     return GPU_SUCCESS;

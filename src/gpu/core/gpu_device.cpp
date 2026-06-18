@@ -58,6 +58,7 @@ void gpuDestroyDevice(GpuDevice device)
         auto& slot = device->shaderObjectPool.slots[i];
         if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
     }
+
     for (uint32_t i = 1; i < poolCap; i++) {
         auto& slot = device->fencePool.slots[i];
         if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
@@ -75,6 +76,10 @@ void gpuDestroyDevice(GpuDevice device)
     }
     for (uint32_t i = 1; i < poolCap; i++) {
         auto& slot = device->texturePool.slots[i];
+        if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
+    }
+    for (uint32_t i = 1; i < poolCap; i++) {
+        auto& slot = device->accelStructPool.slots[i];
         if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
     }
 
@@ -119,16 +124,32 @@ GpuCommandEncoder gpuBeginCommandEncoder(GpuDevice device, GpuCommandQueue queue
     return enc;
 }
 
+static void finalizeCommandBuffer(GpuCommandBuffer_t* buf)
+{
+    if (!buf) return;
+    if (buf->inComputePass && buf->computePassEncoder) {
+        buf->computePassEncoder->end();
+        buf->inComputePass = false;
+        buf->computePassEncoder = nullptr;
+    }
+    if (buf->rhiEncoder) {
+        rhi::ComPtr<rhi::ICommandBuffer> cmdBuffer;
+        buf->rhiEncoder->finish(cmdBuffer.writeRef());
+        buf->rhiCmdBuffer = cmdBuffer;
+        buf->rhiEncoder = nullptr;
+    }
+}
+
 GpuCommandBuffer gpuFinishCommandEncoder(GpuCommandEncoder encoder)
 {
     if (!encoder) return nullptr;
 
-    rhi::ComPtr<rhi::ICommandBuffer> cmdBuffer;
-    encoder->rhiEncoder->finish(cmdBuffer.writeRef());
-
     GpuCommandBuffer buf = new GpuCommandBuffer_t();
-    buf->rhiCmdBuffer = cmdBuffer;
+    buf->rhiEncoder = encoder->rhiEncoder;
     buf->device = encoder->device;
+    buf->boundPipeline = {0, 0};
+    buf->inComputePass = false;
+    buf->computePassEncoder = nullptr;
 
     delete encoder;
     return buf;
@@ -145,7 +166,10 @@ GpuResult gpuQueueSubmit(GpuCommandQueue queue, uint32_t count, GpuCommandBuffer
     for (uint32_t i = 0; i < count; i++) {
         if (!cmdBuffers[i]) continue;
         GpuCommandBuffer_t* buf = static_cast<GpuCommandBuffer_t*>(cmdBuffers[i]);
-        rhiCmdBufs.push_back(buf->rhiCmdBuffer);
+        finalizeCommandBuffer(buf);
+        if (buf->rhiCmdBuffer) {
+            rhiCmdBufs.push_back(buf->rhiCmdBuffer);
+        }
         toDelete.push_back(buf);
     }
 

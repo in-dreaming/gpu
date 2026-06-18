@@ -150,12 +150,8 @@ GpuResult gpuBuildAccelerationStructure(GpuCommandBuffer cmd, GpuAccelerationStr
     rhi::IAccelerationStructure* rhiAS = cmd->device->accelStructPool.resolve(as.index, as.generation);
     if (!rhiAS) return GPU_ERROR_INVALID_ARGS;
 
-    // Note: The actual build should happen via command encoder
-    // For now, we return success as the build would be done during pipeline creation
-    // In a full implementation, this would use the command encoder to dispatch build commands
-    
     (void)update;
-    return GPU_SUCCESS;
+    return GPU_ERROR_NOT_SUPPORTED;
 }
 
 GpuResult gpuDestroyAccelerationStructure(GpuDevice device, GpuAccelerationStructureHandle as)
@@ -174,33 +170,10 @@ GpuResult gpuCreateRayTracingPipeline(GpuDevice device, const GpuRayTracingPipel
 {
     if (!device || !desc || !outPipeline) return GPU_ERROR_INVALID_ARGS;
 
-    // Check if ray tracing is supported
     if (!device->rhiDevice->hasFeature(rhi::Feature::RayTracing)) {
         return GPU_ERROR_NOT_SUPPORTED;
     }
 
-    // Get acceleration structure
-    rhi::IAccelerationStructure* rhiAS = nullptr;
-    if (gpuHandleIsValid(desc->accelerationStructure)) {
-        rhiAS = device->accelStructPool.resolve(desc->accelerationStructure.index, desc->accelerationStructure.generation);
-    }
-
-    // Create ray tracing pipeline desc
-    // Note: This is a simplified version - a full implementation would need shader programs
-    rhi::RayTracingPipelineDesc rtDesc = {};
-    rtDesc.program = nullptr;  // Would need a shader program
-    rtDesc.maxRayPayloadSize = 32;
-        rtDesc.maxAttributeSizeInBytes = 8;
-    
-    rhi::ComPtr<rhi::IRayTracingPipeline> rhiPipeline;
-    rhi::Result r = device->rhiDevice->createRayTracingPipeline(rtDesc, rhiPipeline.writeRef());
-    if (SLANG_FAILED(r)) {
-        return GPU_ERROR_INTERNAL;
-    }
-
-    // Store pipeline (need to extend internal structures for ray tracing pipelines)
-    // For now, return not supported as full implementation needs more work
-    (void)rhiAS;
     *outPipeline = GPU_NULL_HANDLE;
     return GPU_ERROR_NOT_SUPPORTED;
 }

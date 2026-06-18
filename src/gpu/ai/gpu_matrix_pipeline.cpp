@@ -7,8 +7,24 @@
 #include <slang.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <map>
+#include <mutex>
+#include <string>
 
-// Matrix multiplication compute shader (Slang/HLSL compatible)
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
+#ifdef _MSC_VER
+#pragma warning(disable : 4996)
+#endif
+
+extern rhi::IComputePipeline* gpuResolveComputePipeline(GpuDevice device, GpuPipelineHandle pipeline);
+
 static const char* s_matmulShaderSource = R"(
 struct PushConstants
 {
@@ -42,64 +58,95 @@ void main(uint3 threadID : SV_DispatchThreadID)
 }
 )";
 
-// Matmul pipeline state
-struct GpuMatmulPipelineData {
+struct MatmulPipelineEntry {
     GpuDevice device;
-    GpuShaderProgram shaderProgram;
-    GpuBufferHandle dummyBufferA;
-    GpuBufferHandle dummyBufferB;
-    GpuBufferHandle dummyBufferC;
+    GpuShaderProgram program;
+    GpuPipelineHandle pipeline;
+    GpuShaderCompiler compiler;
     uint32_t m, n, k;
-    GpuTensorFormat aFormat, bFormat, cFormat;
-    bool useCooperativeMatrix;
     bool initialized;
 };
 
-// Storage for matmul pipelines
-#define MAX_MATMUL_PIPELINES 64
-static GpuMatmulPipelineData s_matmulPipelines[MAX_MATMUL_PIPELINES];
-static uint32_t s_matmulPipelineCount = 0;
+static std::map<std::string, MatmulPipelineEntry> s_matmulCache;
+static std::mutex s_matmulMutex;
+
+static std::string matmulCacheKey(uint32_t m, uint32_t n, uint32_t k) {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%u_%u_%u", m, n, k);
+    return std::string(buf);
+}
+
+static bool writeShaderToTempFile(const char* content, std::string& outPath) {
+    char tempDir[MAX_PATH];
+    GetTempPathA(MAX_PATH, tempDir);
+    outPath = std::string(tempDir) + "gpu_matmul.slang";
+    FILE* f = fopen(outPath.c_str(), "w");
+    if (!f) return false;
+    fputs(content, f);
+    fclose(f);
+    return true;
+}
 
 GpuResult gpuCreateMatmulPipeline(GpuDevice device, const GpuMatmulDesc* desc, GpuPipelineHandle* outPipeline)
 {
     if (!device || !desc || !outPipeline) return GPU_ERROR_INVALID_ARGS;
     if (desc->m == 0 || desc->n == 0 || desc->k == 0) return GPU_ERROR_INVALID_ARGS;
 
-    // Check compute capability
-    if (!device->computeQueue) {
-        return GPU_ERROR_NOT_SUPPORTED;
+    std::lock_guard<std::mutex> lock(s_matmulMutex);
+    std::string key = matmulCacheKey(desc->m, desc->n, desc->k);
+
+    auto it = s_matmulCache.find(key);
+    if (it != s_matmulCache.end() && it->second.initialized) {
+        *outPipeline = it->second.pipeline;
+        return GPU_SUCCESS;
     }
 
-    // Check cooperative matrix support
-    bool useCoopMatrix = desc->useCooperativeMatrix &&
-                         device->rhiDevice->hasFeature(rhi::Feature::CooperativeMatrix);
+    MatmulPipelineEntry& entry = s_matmulCache[key];
+    entry.device = device;
+    entry.m = desc->m;
+    entry.n = desc->n;
+    entry.k = desc->k;
 
-    // Find empty slot
-    if (s_matmulPipelineCount >= MAX_MATMUL_PIPELINES) {
-        return GPU_ERROR_OUT_OF_MEMORY;
+    GpuResult res = gpuCreateShaderCompiler(device, &entry.compiler);
+    if (res != GPU_SUCCESS) {
+        fprintf(stderr, "gpuCreateMatmulPipeline: shader compiler creation failed %d\n", res);
+        return res;
     }
 
-    uint32_t idx = s_matmulPipelineCount++;
-    GpuMatmulPipelineData& data = s_matmulPipelines[idx];
+    std::string shaderPath;
+    if (!writeShaderToTempFile(s_matmulShaderSource, shaderPath)) {
+        fprintf(stderr, "gpuCreateMatmulPipeline: failed to write temp shader\n");
+        gpuDestroyShaderCompiler(entry.compiler);
+        entry.compiler = NULL;
+        return GPU_ERROR_INTERNAL;
+    }
 
-    data.device = device;
-    data.m = desc->m;
-    data.n = desc->n;
-    data.k = desc->k;
-    data.aFormat = desc->aFormat;
-    data.bFormat = desc->bFormat;
-    data.cFormat = desc->cFormat;
-    data.useCooperativeMatrix = useCoopMatrix;
-    data.initialized = true;
+    GpuShaderCompileDesc compileDesc = {};
+    compileDesc.sourcePath = shaderPath.c_str();
+    compileDesc.entryPoint = "main";
+    compileDesc.target = GPU_SHADER_TARGET_SPIRV;
 
-    // Compile shader (simplified - would use shader compiler)
-    // For now, store the source for later compilation during first dispatch
-    data.shaderProgram = nullptr;
+    res = gpuCompileShader(entry.compiler, &compileDesc, &entry.program);
+    if (res != GPU_SUCCESS) {
+        const char* diag = gpuGetShaderCompileDiagnostic(entry.compiler);
+        fprintf(stderr, "gpuCreateMatmulPipeline: shader compile failed %d (%s)\n", res, diag ? diag : "");
+        gpuDestroyShaderCompiler(entry.compiler);
+        entry.compiler = NULL;
+        return res;
+    }
 
-    // Create handle
-    outPipeline->index = idx + 1;
-    outPipeline->generation = 1;
+    res = gpuCreateComputePipelineFromProgram(device, entry.program, "Matmul", &entry.pipeline);
+    if (res != GPU_SUCCESS) {
+        fprintf(stderr, "gpuCreateMatmulPipeline: pipeline creation failed %d\n", res);
+        gpuDestroyShaderProgram(entry.program);
+        entry.program = NULL;
+        gpuDestroyShaderCompiler(entry.compiler);
+        entry.compiler = NULL;
+        return res;
+    }
 
+    entry.initialized = true;
+    *outPipeline = entry.pipeline;
     return GPU_SUCCESS;
 }
 
@@ -107,44 +154,43 @@ void gpuCmdMatmul(GpuCommandBuffer cmd, GpuPipelineHandle matmulPipeline, const 
 {
     if (!cmd || !cmd->device || !matmulPipeline.index || !bindings) return;
 
-    uint32_t idx = matmulPipeline.index - 1;
-    if (idx >= s_matmulPipelineCount) return;
+    GpuDevice device = cmd->device;
 
-    GpuMatmulPipelineData& data = s_matmulPipelines[idx];
-    if (!data.initialized) return;
-
-    // Get tensor buffers
-    GpuBufferHandle bufferA = gpuGetTensorBuffer(cmd->device, bindings->a);
-    GpuBufferHandle bufferB = gpuGetTensorBuffer(cmd->device, bindings->b);
-    GpuBufferHandle bufferC = gpuGetTensorBuffer(cmd->device, bindings->c);
+    GpuBufferHandle bufferA = gpuGetTensorBuffer(device, bindings->a);
+    GpuBufferHandle bufferB = gpuGetTensorBuffer(device, bindings->b);
+    GpuBufferHandle bufferC = gpuGetTensorBuffer(device, bindings->c);
 
     if (!bufferA.index || !bufferB.index || !bufferC.index) {
         fprintf(stderr, "gpuCmdMatmul: Invalid tensor buffers\n");
         return;
     }
 
-    // Calculate dispatch size (16x16 thread groups)
-    uint32_t dispatchX = (data.n + 15) / 16;
-    uint32_t dispatchY = (data.m + 15) / 16;
-    uint32_t dispatchZ = 1;
+    std::lock_guard<std::mutex> lock(s_matmulMutex);
+    for (auto& [key, entry] : s_matmulCache) {
+        if (entry.pipeline.index == matmulPipeline.index &&
+            entry.pipeline.generation == matmulPipeline.generation &&
+            entry.initialized) {
 
-    // Dispatch compute work using the command buffer's device
-    rhi::ICommandQueue* rhiQueue = cmd->device->computeQueue.get();
-    if (!rhiQueue) {
-        fprintf(stderr, "gpuCmdMatmul: No compute queue available\n");
-        return;
+            if (!cmd->rhiEncoder) return;
+
+            if (!cmd->inComputePass) {
+                cmd->computePassEncoder = cmd->rhiEncoder->beginComputePass();
+                if (cmd->computePassEncoder) {
+                    cmd->inComputePass = true;
+                }
+            }
+
+            if (cmd->inComputePass && cmd->computePassEncoder) {
+                rhi::IComputePipeline* pipe = gpuResolveComputePipeline(cmd->device, matmulPipeline);
+                if (pipe) {
+                    cmd->computePassEncoder->bindPipeline(pipe);
+                }
+
+                uint32_t dispatchX = (entry.n + 15) / 16;
+                uint32_t dispatchY = (entry.m + 15) / 16;
+                cmd->computePassEncoder->dispatchCompute(dispatchX, dispatchY, 1);
+            }
+            return;
+        }
     }
-
-    // In a full implementation:
-    // 1. Create/fetch compute pipeline from shader
-    // 2. Begin compute pass on command buffer
-    // 3. Bind pipeline
-    // 4. Bind tensor buffers as RWStructuredBuffer resources
-    // 5. Set push constants for M, N, K
-    // 6. Dispatch compute
-
-    // For now, record that the work is dispatched (actual execution deferred)
-    (void)dispatchX;
-    (void)dispatchY;
-    (void)dispatchZ;
 }

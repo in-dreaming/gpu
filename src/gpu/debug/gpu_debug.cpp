@@ -1,4 +1,5 @@
 #include "gpu/debug/gpu_debug.h"
+#include "gpu/core/gpu_internal.h"
 #include <string>
 
 static thread_local std::string s_lastError;
@@ -8,9 +9,9 @@ static GpuDebugLevel s_debugLevel = GPU_DEBUG_LEVEL_NONE;
 
 void gpuSetDebugCallback(GpuDevice device, GpuDebugCallback callback, void* userData)
 {
-    (void)device;
     s_debugCallback = callback;
     s_debugUserData = userData;
+    (void)device;
 }
 
 const char* gpuGetLastError(void)

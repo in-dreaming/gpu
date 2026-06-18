@@ -227,29 +227,27 @@ GpuResult gpuParameterBlockUpload(GpuDevice device, GpuParameterBlock block) {
     if (!device || !block) {
         return GPU_ERROR_INVALID_PARAMETER;
     }
-    
+
     if (!block->dirty) {
         return GPU_OK;
     }
-    
-    // Create GPU buffer if needed
+
     if (!gpuHandleIsValid(block->gpuBuffer)) {
-        GpuBufferDesc desc = {
-            .size = block->size,
-            .usage = GPU_BUFFER_USAGE_CONSTANT_BUFFER | GPU_BUFFER_USAGE_COPY_DEST,
-        };
+        GpuBufferDesc desc = {};
+        desc.size = block->size;
+        desc.usage = GPU_BUFFER_USAGE_CONSTANT_BUFFER | GPU_BUFFER_USAGE_COPY_DEST;
         GpuResult result = gpuCreateBuffer(device, &desc, &block->gpuBuffer);
         if (result != GPU_OK) {
             return result;
         }
     }
-    
-    // Upload data to GPU
-    // TODO: Implement actual buffer upload via command list
-    // For now, mark as not dirty (assuming upload will happen)
-    block->dirty = false;
-    
-    return GPU_OK;
+
+    GpuResult result = gpuUploadToBuffer(device, block->gpuBuffer, block->cpuData, block->size, 0);
+    if (result == GPU_OK) {
+        block->dirty = false;
+    }
+
+    return result;
 }
 
 void* gpuParameterBlockMapCpuMemory(GpuParameterBlock block) {

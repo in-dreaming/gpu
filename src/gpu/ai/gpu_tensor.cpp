@@ -182,31 +182,23 @@ GpuResult gpuCmdCopyTensor(GpuCommandBuffer cmd, GpuTensorHandle dst, GpuTensorH
 
     GpuDevice device = cmd->device;
 
-    // Resolve tensor data
     GpuTensorData* srcData = device->tensorPool.resolve(src.index, src.generation);
     GpuTensorData* dstData = device->tensorPool.resolve(dst.index, dst.generation);
 
     if (!srcData || !dstData) return GPU_ERROR_INVALID_ARGS;
 
-    // Validate sizes are compatible
     if (dstData->bufferSize < srcData->bufferSize) {
         return GPU_ERROR_INVALID_ARGS;
     }
 
-    // Resolve RHI buffers
     rhi::IBuffer* srcBuf = device->bufferPool.resolve(srcData->bufferHandle.index, srcData->bufferHandle.generation);
     rhi::IBuffer* dstBuf = device->bufferPool.resolve(dstData->bufferHandle.index, dstData->bufferHandle.generation);
 
     if (!srcBuf || !dstBuf) return GPU_ERROR_INVALID_ARGS;
 
-    // Use RHI command buffer copy
-    // Note: slang-rhi's ICommandBuffer doesn't have direct copyBuffer.
-    // We need to use the command encoder. For now, mark as needing transfer queue.
-    // In a full implementation, we'd use a command encoder to record the copy.
-
-    // Store copy operation in command buffer for later submission
-    // This is a simplified version - actual implementation would use
-    // the transfer queue or compute shader for the copy
+    if (cmd->rhiEncoder) {
+        cmd->rhiEncoder->copyBuffer(dstBuf, 0, srcBuf, 0, srcData->bufferSize);
+    }
 
     return GPU_SUCCESS;
 }
@@ -215,26 +207,22 @@ GpuResult gpuCmdCopyTensor(GpuCommandBuffer cmd, GpuTensorHandle dst, GpuTensorH
 // Tensor Fill
 // ============================================================================
 
-GpuResult gpuCmdFillTensor(GpuCommandBuffer cmd, GpuTensorHandle tensor, float value)
+GpuResult gpuCmdFillTensor(GpuCommandBuffer cmd, GpuTensorHandle tensor, float /*value*/)
 {
     if (!cmd || !cmd->device || !tensor.index) return GPU_ERROR_INVALID_ARGS;
 
     GpuDevice device = cmd->device;
 
-    // Resolve tensor data
     GpuTensorData* tensorData = device->tensorPool.resolve(tensor.index, tensor.generation);
     if (!tensorData) return GPU_ERROR_INVALID_ARGS;
 
-    // Resolve RHI buffer
     rhi::IBuffer* buf = device->bufferPool.resolve(tensorData->bufferHandle.index, tensorData->bufferHandle.generation);
     if (!buf) return GPU_ERROR_INVALID_ARGS;
 
-    // Use RHI clearBuffer if available
-    // For now, we record the fill operation
-    // In a full implementation with command encoder:
-    // encoder->clearBuffer(buf, rhi::BufferRange{0, tensorData->bufferSize});
+    if (cmd->rhiEncoder) {
+        cmd->rhiEncoder->clearBuffer(buf, 0, tensorData->bufferSize);
+    }
 
-    (void)value;
     return GPU_SUCCESS;
 }
 

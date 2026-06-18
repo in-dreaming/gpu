@@ -6,6 +6,7 @@
 // Mesh Pipeline (Header-only stubs - full implementation pending slang-rhi support)
 // ============================================================================
 
+// TODO: STUB - pending slang-rhi mesh pipeline API
 extern "C" GpuResult gpuCreateMeshPipeline(GpuDevice device, const GpuMeshPipelineDesc* desc, GpuPipelineHandle* outPipeline) {
     (void)device;
     (void)desc;
@@ -14,6 +15,7 @@ extern "C" GpuResult gpuCreateMeshPipeline(GpuDevice device, const GpuMeshPipeli
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending slang-rhi mesh pipeline API
 extern "C" void gpuCmdDrawMeshTasks(GpuCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
     (void)cmd;
     (void)groupCountX;
@@ -22,6 +24,7 @@ extern "C" void gpuCmdDrawMeshTasks(GpuCommandBuffer cmd, uint32_t groupCountX, 
     // Mesh shader dispatch requires slang-rhi mesh encoder support
 }
 
+// TODO: STUB - pending slang-rhi mesh pipeline API
 extern "C" void gpuCmdDrawMeshTasksIndirect(GpuCommandBuffer cmd, GpuBufferHandle indirectBuffer, uint64_t offset) {
     (void)cmd;
     (void)indirectBuffer;
@@ -29,6 +32,7 @@ extern "C" void gpuCmdDrawMeshTasksIndirect(GpuCommandBuffer cmd, GpuBufferHandl
     // Indirect mesh shader dispatch requires slang-rhi support
 }
 
+// TODO: STUB - pending slang-rhi mesh pipeline API
 extern "C" void gpuCmdDrawMeshTasksIndirectCount(GpuCommandBuffer cmd,
                                                   GpuBufferHandle indirectBuffer,
                                                   uint64_t indirectOffset,
@@ -44,6 +48,7 @@ extern "C" void gpuCmdDrawMeshTasksIndirectCount(GpuCommandBuffer cmd,
     // Indirect count mesh shader dispatch requires slang-rhi support
 }
 
+// TODO: STUB - pending slang-rhi mesh pipeline API
 extern "C" GpuResult gpuGetMeshShaderLimits(GpuDevice device, GpuMeshShaderLimits* outLimits) {
     if (!device || !outLimits) {
         return GPU_ERROR_INVALID_PARAMETER;

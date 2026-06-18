@@ -1,5 +1,6 @@
 #include "gpu/workgraph/gpu_work_graph.h"
 
+// TODO: STUB - pending D3D12 Work Graph implementation
 GpuResult gpuCreateWorkGraph(GpuDevice device, const GpuWorkGraphDesc* desc, GpuWorkGraph* outGraph)
 {
     (void)device;
@@ -11,6 +12,7 @@ GpuResult gpuCreateWorkGraph(GpuDevice device, const GpuWorkGraphDesc* desc, Gpu
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending D3D12 Work Graph implementation
 GpuResult gpuWorkGraphInitialize(GpuWorkGraph graph, GpuCommandBuffer cmd)
 {
     (void)graph;
@@ -18,6 +20,7 @@ GpuResult gpuWorkGraphInitialize(GpuWorkGraph graph, GpuCommandBuffer cmd)
     return GPU_ERROR_NOT_SUPPORTED;
 }
 
+// TODO: STUB - pending D3D12 Work Graph implementation
 void gpuCmdDispatchWorkGraph(GpuCommandBuffer cmd, GpuWorkGraph graph, uint32_t recordCount)
 {
     (void)cmd;
@@ -25,6 +28,7 @@ void gpuCmdDispatchWorkGraph(GpuCommandBuffer cmd, GpuWorkGraph graph, uint32_t 
     (void)recordCount;
 }
 
+// TODO: STUB - pending D3D12 Work Graph implementation
 void gpuDestroyWorkGraph(GpuDevice device, GpuWorkGraph graph)
 {
     (void)device;

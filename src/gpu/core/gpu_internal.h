@@ -33,7 +33,12 @@ struct GpuCommandEncoder_t {
 
 struct GpuCommandBuffer_t {
     rhi::ComPtr<rhi::ICommandBuffer> rhiCmdBuffer;
+    rhi::ComPtr<rhi::ICommandEncoder> rhiEncoder;
     GpuDevice device;
+
+    GpuPipelineHandle boundPipeline;
+    bool inComputePass;
+    rhi::IComputePassEncoder* computePassEncoder;
 };
 
 struct GpuSurface_t {
