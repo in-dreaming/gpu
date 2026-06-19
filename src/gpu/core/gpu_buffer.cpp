@@ -81,18 +81,26 @@ GpuResult gpuUploadToBuffer(GpuDevice device, GpuBufferHandle buffer, const void
     rhi::IBuffer* buf = device->bufferPool.resolve(buffer.index, buffer.generation);
     if (!buf) return GPU_ERROR_INVALID_ARGS;
 
-    // Map buffer for writing
     void* mappedData = nullptr;
-    if (SLANG_FAILED(device->rhiDevice->mapBuffer(buf, rhi::CpuAccessMode::Write, &mappedData))) {
-        return GPU_ERROR_INTERNAL;
+    if (SLANG_SUCCEEDED(device->rhiDevice->mapBuffer(buf, rhi::CpuAccessMode::Write, &mappedData))) {
+        memcpy(static_cast<uint8_t*>(mappedData) + offset, data, size);
+        device->rhiDevice->unmapBuffer(buf);
+        return GPU_SUCCESS;
     }
 
-    // Copy data to mapped buffer
-    memcpy(static_cast<uint8_t*>(mappedData) + offset, data, size);
-
-    // Unmap buffer
-    device->rhiDevice->unmapBuffer(buf);
-
+    rhi::ComPtr<rhi::ICommandEncoder> encoder;
+    if (SLANG_FAILED(device->graphicsQueue->createCommandEncoder(encoder.writeRef()))) {
+        return GPU_ERROR_INTERNAL;
+    }
+    encoder->uploadBufferData(buf, offset, size, data);
+    rhi::ComPtr<rhi::ICommandBuffer> cmdBuf;
+    encoder->finish(cmdBuf.writeRef());
+    rhi::SubmitDesc submit = {};
+    rhi::ICommandBuffer* cmd = cmdBuf.get();
+    submit.commandBuffers = &cmd;
+    submit.commandBufferCount = 1;
+    device->graphicsQueue->submit(submit);
+    device->graphicsQueue->waitOnHost();
     return GPU_SUCCESS;
 }
 
@@ -103,17 +111,42 @@ GpuResult gpuDownloadFromBuffer(GpuDevice device, GpuBufferHandle buffer, void* 
     rhi::IBuffer* buf = device->bufferPool.resolve(buffer.index, buffer.generation);
     if (!buf) return GPU_ERROR_INVALID_ARGS;
 
-    // Map buffer for reading
     void* mappedData = nullptr;
-    if (SLANG_FAILED(device->rhiDevice->mapBuffer(buf, rhi::CpuAccessMode::Read, &mappedData))) {
+    if (SLANG_SUCCEEDED(device->rhiDevice->mapBuffer(buf, rhi::CpuAccessMode::Read, &mappedData))) {
+        memcpy(outData, static_cast<uint8_t*>(mappedData) + offset, size);
+        device->rhiDevice->unmapBuffer(buf);
+        return GPU_SUCCESS;
+    }
+
+    rhi::BufferDesc stagingDesc = {};
+    stagingDesc.size = size;
+    stagingDesc.usage = rhi::BufferUsage::CopyDestination;
+    stagingDesc.memoryType = rhi::MemoryType::ReadBack;
+    stagingDesc.label = "download_staging";
+
+    rhi::ComPtr<rhi::IBuffer> staging;
+    if (SLANG_FAILED(device->rhiDevice->createBuffer(stagingDesc, nullptr, staging.writeRef()))) {
         return GPU_ERROR_INTERNAL;
     }
 
-    // Copy data from mapped buffer
-    memcpy(outData, static_cast<uint8_t*>(mappedData) + offset, size);
+    rhi::ComPtr<rhi::ICommandEncoder> encoder;
+    if (SLANG_FAILED(device->graphicsQueue->createCommandEncoder(encoder.writeRef()))) {
+        return GPU_ERROR_INTERNAL;
+    }
+    encoder->copyBuffer(staging, 0, buf, offset, size);
+    rhi::ComPtr<rhi::ICommandBuffer> cmdBuf;
+    encoder->finish(cmdBuf.writeRef());
+    rhi::SubmitDesc submit = {};
+    rhi::ICommandBuffer* cmd = cmdBuf.get();
+    submit.commandBuffers = &cmd;
+    submit.commandBufferCount = 1;
+    device->graphicsQueue->submit(submit);
+    device->graphicsQueue->waitOnHost();
 
-    // Unmap buffer
-    device->rhiDevice->unmapBuffer(buf);
-
-    return GPU_SUCCESS;
+    if (SLANG_SUCCEEDED(device->rhiDevice->mapBuffer(staging, rhi::CpuAccessMode::Read, &mappedData))) {
+        memcpy(outData, mappedData, size);
+        device->rhiDevice->unmapBuffer(staging);
+        return GPU_SUCCESS;
+    }
+    return GPU_ERROR_INTERNAL;
 }

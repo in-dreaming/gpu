@@ -31,6 +31,19 @@ struct GpuCommandEncoder_t {
     GpuDevice device;
 };
 
+struct GpuPendingBind {
+    uint32_t set;
+    uint32_t binding;
+    GpuBufferHandle buffer;
+    uint64_t bufferOffset;
+    uint64_t bufferRange;
+    GpuTextureHandle texture;
+    uint32_t samplerIndex;
+    bool isBuffer;
+    bool isTexture;
+    bool isSampler;
+};
+
 struct GpuCommandBuffer_t {
     rhi::ComPtr<rhi::ICommandBuffer> rhiCmdBuffer;
     rhi::ComPtr<rhi::ICommandEncoder> rhiEncoder;
@@ -39,6 +52,22 @@ struct GpuCommandBuffer_t {
     GpuPipelineHandle boundPipeline;
     bool inComputePass;
     rhi::IComputePassEncoder* computePassEncoder;
+    bool inRenderPass;
+    rhi::IRenderPassEncoder* renderPassEncoder;
+    bool inRayTracingPass;
+    rhi::IRayTracingPassEncoder* rtPassEncoder;
+
+    float blendConstants[4];
+    bool blendConstantsSet;
+    float depthBiasConstant;
+    float depthBiasSlopeScaled;
+    float depthBiasClamp;
+    bool depthBiasSet;
+
+    rhi::IShaderObject* rootShaderObject;
+
+    GpuPendingBind pendingBinds[64];
+    uint32_t pendingBindCount;
 };
 
 struct GpuSurface_t {

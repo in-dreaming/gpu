@@ -127,7 +127,13 @@ GpuResult gpuQueueWaitIdle(GpuCommandQueue queue);
 GpuResult gpuGetQueueTimestampFrequency(GpuCommandQueue queue, uint64_t* outFrequency);
 
 // Write timestamp to query set (for GPU timing)
-// void gpuCmdWriteTimestamp(GpuCommandBuffer cmd, uint32_t queryIndex); // TODO: Add query set API
+typedef struct GpuQueryPool_t* GpuQueryPool;
+
+GpuResult gpuCreateQueryPool(GpuDevice device, uint32_t queryCount, GpuQueryPool* outPool);
+void gpuDestroyQueryPool(GpuDevice device, GpuQueryPool pool);
+GpuResult gpuQueryPoolGetResults(GpuQueryPool pool, uint32_t startIndex, uint32_t count, uint64_t* outData);
+GpuResult gpuQueryPoolReset(GpuQueryPool pool, uint32_t startIndex, uint32_t count);
+void gpuCmdWriteTimestamp(GpuCommandBuffer cmd, GpuQueryPool pool, uint32_t queryIndex);
 
 #ifdef __cplusplus
 }

@@ -4,6 +4,19 @@
 #include "gpu/shader/gpu_shader_compiler.h"
 #include <string.h>
 #include <slang-rhi.h>
+#include <slang.h>
+#include <vector>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
+#ifdef _MSC_VER
+#pragma warning(disable : 4996)
+#endif
 
 // Storage pools for pipeline states
 static GpuHandlePool<rhi::IRenderPipeline> g_renderPipelinePool;
@@ -121,26 +134,120 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
         return GPU_ERROR_INVALID_PARAMETER;
     }
 
-    // Note: slang-rhi requires IShaderProgram* and IInputLayout* which are created
-    // through the shader compilation system. For now, this is a stub that would
-    // need proper shader program creation to work end-to-end.
-    // TODO: Integrate with shader compiler to create IShaderProgram from shader bytecode
+    rhi::ComPtr<rhi::IShaderProgram> rhiProgram;
 
-    // Build RHI graphics pipeline state
+    bool hasVertexShader = desc->vertexShader.data && desc->vertexShader.size > 0;
+    bool hasFragmentShader = desc->fragmentShader.data && desc->fragmentShader.size > 0;
+
+    if (hasVertexShader || hasFragmentShader) {
+        rhi::ComPtr<slang::ISession> slangSession;
+        if (SLANG_FAILED(device->rhiDevice->getSlangSession(slangSession.writeRef()))) {
+            return GPU_ERROR_INTERNAL;
+        }
+
+        std::string vsSrc((const char*)desc->vertexShader.data, (size_t)desc->vertexShader.size);
+        std::string fsSrc((const char*)desc->fragmentShader.data, (size_t)desc->fragmentShader.size);
+
+        char tempDir[MAX_PATH];
+        GetTempPathA(MAX_PATH, tempDir);
+        std::string vsPath = std::string(tempDir) + "gpu_vs.slang";
+        std::string fsPath = std::string(tempDir) + "gpu_fs.slang";
+
+        std::vector<rhi::ComPtr<slang::IModule>> modules;
+        std::vector<rhi::ComPtr<slang::IEntryPoint>> entryPoints;
+        std::vector<slang::IComponentType*> componentTypes;
+
+        if (hasVertexShader) {
+            FILE* f = fopen(vsPath.c_str(), "w");
+            if (f) { fputs(vsSrc.c_str(), f); fclose(f); }
+
+            rhi::ComPtr<slang::IModule> vsModule;
+            slang::IBlob* vsDiag = nullptr;
+            vsModule = slangSession->loadModule(vsPath.c_str(), &vsDiag);
+            if (vsDiag) vsDiag->release();
+            if (vsModule) {
+                modules.push_back(vsModule);
+                componentTypes.push_back(vsModule.get());
+                rhi::ComPtr<slang::IEntryPoint> vsEntry;
+                if (SLANG_SUCCEEDED(vsModule->findEntryPointByName("vertexMain", vsEntry.writeRef())) ||
+                    SLANG_SUCCEEDED(vsModule->findEntryPointByName("main", vsEntry.writeRef()))) {
+                    entryPoints.push_back(vsEntry);
+                }
+            }
+        }
+
+        if (hasFragmentShader) {
+            FILE* f = fopen(fsPath.c_str(), "w");
+            if (f) { fputs(fsSrc.c_str(), f); fclose(f); }
+
+            rhi::ComPtr<slang::IModule> fsModule;
+            slang::IBlob* fsDiag = nullptr;
+            fsModule = slangSession->loadModule(fsPath.c_str(), &fsDiag);
+            if (fsDiag) fsDiag->release();
+            if (fsModule) {
+                modules.push_back(fsModule);
+                componentTypes.push_back(fsModule.get());
+                rhi::ComPtr<slang::IEntryPoint> fsEntry;
+                if (SLANG_SUCCEEDED(fsModule->findEntryPointByName("fragmentMain", fsEntry.writeRef())) ||
+                    SLANG_SUCCEEDED(fsModule->findEntryPointByName("main", fsEntry.writeRef()))) {
+                    entryPoints.push_back(fsEntry);
+                }
+            }
+        }
+
+        if (!componentTypes.empty()) {
+            std::vector<slang::IComponentType*> rawComponentsPlusEntries;
+            for (auto ct : componentTypes) rawComponentsPlusEntries.push_back(ct);
+            for (auto& ep : entryPoints) rawComponentsPlusEntries.push_back(ep.get());
+
+            rhi::ComPtr<slang::IComponentType> linkedProgram;
+            rhi::ComPtr<slang::IBlob> linkDiag;
+            slangSession->createCompositeComponentType(
+                rawComponentsPlusEntries.data(), (uint32_t)rawComponentsPlusEntries.size(),
+                linkedProgram.writeRef(), linkDiag.writeRef());
+
+            if (linkedProgram) {
+                rhi::ShaderProgramDesc programDesc = {};
+                programDesc.slangGlobalScope = linkedProgram.get();
+
+                std::vector<slang::IComponentType*> rawEntries;
+                for (auto& ep : entryPoints) rawEntries.push_back(ep.get());
+                programDesc.slangEntryPoints = rawEntries.data();
+                programDesc.slangEntryPointCount = (uint32_t)rawEntries.size();
+
+                device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef());
+            }
+        }
+    }
+
     rhi::RenderPipelineDesc rhiDesc = {};
-    rhiDesc.structType = rhi::StructType::RenderPipelineDesc;
-
-    // Primitive topology
+    rhiDesc.program = rhiProgram;
     rhiDesc.primitiveTopology = convertTopology(desc->primitiveTopology);
+    rhiDesc.label = desc->label;
 
-    // Rasterizer state
+    std::vector<rhi::ColorTargetDesc> targets;
+    for (uint32_t i = 0; i < desc->colorTargetCount; i++) {
+        rhi::ColorTargetDesc target = {};
+        target.format = gpuFormatToRhi(desc->colorTargets[i].format);
+        target.enableBlend = desc->colorTargets[i].blend.blendEnable;
+        target.color.srcFactor = convertBlendFactor(desc->colorTargets[i].blend.srcColorBlendFactor);
+        target.color.dstFactor = convertBlendFactor(desc->colorTargets[i].blend.dstColorBlendFactor);
+        target.color.op = convertBlendOp(desc->colorTargets[i].blend.colorBlendOp);
+        target.alpha.srcFactor = convertBlendFactor(desc->colorTargets[i].blend.srcAlphaBlendFactor);
+        target.alpha.dstFactor = convertBlendFactor(desc->colorTargets[i].blend.dstAlphaBlendFactor);
+        target.alpha.op = convertBlendOp(desc->colorTargets[i].blend.alphaBlendOp);
+        target.writeMask = (rhi::RenderTargetWriteMask)(desc->colorTargets[i].blend.colorWriteMask & 0xF);
+        targets.push_back(target);
+    }
+    rhiDesc.targets = targets.data();
+    rhiDesc.targetCount = desc->colorTargetCount;
+
     rhiDesc.rasterizer.cullMode = convertCullMode(desc->cullMode);
-    rhiDesc.rasterizer.frontFace = (desc->frontFace == GPU_FRONT_FACE_CLOCKWISE) 
-                                    ? rhi::FrontFaceMode::Clockwise 
+    rhiDesc.rasterizer.frontFace = (desc->frontFace == GPU_FRONT_FACE_CLOCKWISE)
+                                    ? rhi::FrontFaceMode::Clockwise
                                     : rhi::FrontFaceMode::CounterClockwise;
     rhiDesc.rasterizer.fillMode = convertFillMode(desc->polygonMode);
 
-    // Depth-stencil state
     rhiDesc.depthStencil.depthTestEnable = desc->depthTestEnable;
     rhiDesc.depthStencil.depthWriteEnable = desc->depthWriteEnable;
     rhiDesc.depthStencil.depthFunc = convertCompareOp(desc->depthCompareOp);
@@ -148,60 +255,22 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
         rhiDesc.depthStencil.format = gpuFormatToRhi(desc->depthStencilFormat);
     }
 
-    // Color target states
-    rhi::ColorTargetDesc targetDescs[8] = {};
-    
-    uint32_t targetCount = desc->colorTargetCount < 8 ? desc->colorTargetCount : 8;
-    for (uint32_t i = 0; i < targetCount; i++) {
-        targetDescs[i].format = gpuFormatToRhi(desc->colorTargets[i].format);
-        targetDescs[i].enableBlend = desc->colorTargets[i].blend.blendEnable;
-        targetDescs[i].color.srcFactor = convertBlendFactor(desc->colorTargets[i].blend.srcColorBlendFactor);
-        targetDescs[i].color.dstFactor = convertBlendFactor(desc->colorTargets[i].blend.dstColorBlendFactor);
-        targetDescs[i].color.op = convertBlendOp(desc->colorTargets[i].blend.colorBlendOp);
-        targetDescs[i].alpha.srcFactor = convertBlendFactor(desc->colorTargets[i].blend.srcAlphaBlendFactor);
-        targetDescs[i].alpha.dstFactor = convertBlendFactor(desc->colorTargets[i].blend.dstAlphaBlendFactor);
-        targetDescs[i].alpha.op = convertBlendOp(desc->colorTargets[i].blend.alphaBlendOp);
-        targetDescs[i].writeMask = (rhi::RenderTargetWriteMask)(desc->colorTargets[i].blend.colorWriteMask & 0xF);
-    }
-    
-    rhiDesc.targets = targetDescs;
-    rhiDesc.targetCount = targetCount;
-
-    // Multisample state
     rhiDesc.multisample.sampleCount = desc->sampleCount > 0 ? desc->sampleCount : 1;
 
-    // Label
-    rhiDesc.label = desc->label;
-
-    // TODO: Create IShaderProgram from vertexShader and fragmentShader
-    // TODO: Create IInputLayout from vertexAttributes and vertexBindings
-    // These require integration with the shader compiler system
-    
-    (void)desc->vertexShader;
-    (void)desc->fragmentShader;
-    (void)desc->vertexAttributes;
-    (void)desc->vertexAttributeCount;
-    (void)desc->vertexBindings;
-    (void)desc->vertexBindingCount;
-
-    // Create pipeline
     rhi::ComPtr<rhi::IRenderPipeline> rhiPipeline;
     rhi::Result r = device->rhiDevice->createRenderPipeline(rhiDesc, rhiPipeline.writeRef());
-    
+
     if (SLANG_FAILED(r)) {
         return GPU_ERROR_UNKNOWN;
     }
 
-    // Store in pool and get index
     uint32_t index = g_renderPipelinePool.allocate(rhiPipeline.detach());
     if (index == 0) {
         return GPU_ERROR_OUT_OF_MEMORY;
     }
-    
-    // Get base generation from pool
-    uint32_t baseGen = 1; // Pool starts at generation 1
+
     outPipeline->index = index;
-    outPipeline->generation = encodeTypeInGeneration(GPU_PIPELINE_TYPE_GRAPHICS, baseGen);
+    outPipeline->generation = encodeTypeInGeneration(GPU_PIPELINE_TYPE_GRAPHICS, 1);
 
     return GPU_OK;
 }
@@ -215,32 +284,73 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
         return GPU_ERROR_INVALID_PARAMETER;
     }
 
-    // Build RHI compute pipeline state
-    rhi::ComputePipelineDesc rhiDesc = {};
-    rhiDesc.structType = rhi::StructType::ComputePipelineDesc;
-    
-    // TODO: Create IShaderProgram from compute shader bytecode
-    // This requires integration with the shader compiler system
-    (void)desc->computeShader;
+    rhi::ComPtr<slang::ISession> slangSession;
+    if (SLANG_FAILED(device->rhiDevice->getSlangSession(slangSession.writeRef()))) {
+        return GPU_ERROR_INTERNAL;
+    }
 
+    rhi::ComPtr<slang::IModule> csModule;
+    if (desc->computeShader.data && desc->computeShader.size > 0) {
+        std::string csSrc((const char*)desc->computeShader.data, (size_t)desc->computeShader.size);
+
+        char tempDir[MAX_PATH];
+        GetTempPathA(MAX_PATH, tempDir);
+        std::string csPath = std::string(tempDir) + "gpu_cs.slang";
+
+        FILE* f = fopen(csPath.c_str(), "w");
+        if (f) { fputs(csSrc.c_str(), f); fclose(f); }
+
+        slang::IBlob* csDiag = nullptr;
+        csModule = slangSession->loadModule(csPath.c_str(), &csDiag);
+        if (csDiag) csDiag->release();
+        if (!csModule) {
+            return GPU_ERROR_INTERNAL;
+        }
+    } else {
+        return GPU_ERROR_INVALID_PARAMETER;
+    }
+
+    rhi::ComPtr<slang::IEntryPoint> csEntry;
+    if (SLANG_FAILED(csModule->findEntryPointByName("main", csEntry.writeRef()))) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+
+    slang::IComponentType* components[] = { csModule.get(), csEntry.get() };
+    rhi::ComPtr<slang::IComponentType> linked;
+    rhi::ComPtr<slang::IBlob> linkDiag;
+    slangSession->createCompositeComponentType(components, 2, linked.writeRef(), linkDiag.writeRef());
+
+    if (!linked) return GPU_ERROR_INTERNAL;
+
+    rhi::ShaderProgramDesc programDesc = {};
+    programDesc.slangGlobalScope = linked.get();
+    slang::IComponentType* entries[] = { csEntry.get() };
+    programDesc.slangEntryPoints = entries;
+    programDesc.slangEntryPointCount = 1;
+
+    rhi::ComPtr<rhi::IShaderProgram> rhiProgram;
+    if (SLANG_FAILED(device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef()))) {
+        return GPU_ERROR_INTERNAL;
+    }
+
+    rhi::ComputePipelineDesc rhiDesc = {};
+    rhiDesc.program = rhiProgram;
     rhiDesc.label = desc->label;
 
     rhi::ComPtr<rhi::IComputePipeline> rhiPipeline;
     rhi::Result r = device->rhiDevice->createComputePipeline(rhiDesc, rhiPipeline.writeRef());
-    
+
     if (SLANG_FAILED(r)) {
         return GPU_ERROR_UNKNOWN;
     }
 
-    // Store in pool
     uint32_t index = g_computePipelinePool.allocate(rhiPipeline.detach());
     if (index == 0) {
         return GPU_ERROR_OUT_OF_MEMORY;
     }
-    
-    uint32_t baseGen = 1;
+
     outPipeline->index = index;
-    outPipeline->generation = encodeTypeInGeneration(GPU_PIPELINE_TYPE_COMPUTE, baseGen);
+    outPipeline->generation = encodeTypeInGeneration(GPU_PIPELINE_TYPE_COMPUTE, 1);
 
     return GPU_OK;
 }
@@ -304,7 +414,7 @@ extern "C" GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipe
         g_computePipelinePool.release(pipeline.index, gen);
         break;
     case GPU_PIPELINE_TYPE_RAYTRACING:
-        return GPU_ERROR_NOT_SUPPORTED;
+        break;
     }
 
     return GPU_OK;

@@ -127,6 +127,16 @@ GpuCommandEncoder gpuBeginCommandEncoder(GpuDevice device, GpuCommandQueue queue
 static void finalizeCommandBuffer(GpuCommandBuffer_t* buf)
 {
     if (!buf) return;
+    if (buf->inRayTracingPass && buf->rtPassEncoder) {
+        buf->rtPassEncoder->end();
+        buf->inRayTracingPass = false;
+        buf->rtPassEncoder = nullptr;
+    }
+    if (buf->inRenderPass && buf->renderPassEncoder) {
+        buf->renderPassEncoder->end();
+        buf->inRenderPass = false;
+        buf->renderPassEncoder = nullptr;
+    }
     if (buf->inComputePass && buf->computePassEncoder) {
         buf->computePassEncoder->end();
         buf->inComputePass = false;
@@ -150,6 +160,19 @@ GpuCommandBuffer gpuFinishCommandEncoder(GpuCommandEncoder encoder)
     buf->boundPipeline = {0, 0};
     buf->inComputePass = false;
     buf->computePassEncoder = nullptr;
+    buf->inRenderPass = false;
+    buf->renderPassEncoder = nullptr;
+    buf->inRayTracingPass = false;
+    buf->rtPassEncoder = nullptr;
+    memset(buf->blendConstants, 0, sizeof(buf->blendConstants));
+    buf->blendConstantsSet = false;
+    buf->depthBiasConstant = 0.0f;
+    buf->depthBiasSlopeScaled = 0.0f;
+    buf->depthBiasClamp = 0.0f;
+    buf->depthBiasSet = false;
+    buf->rootShaderObject = nullptr;
+    memset(buf->pendingBinds, 0, sizeof(buf->pendingBinds));
+    buf->pendingBindCount = 0;
 
     delete encoder;
     return buf;

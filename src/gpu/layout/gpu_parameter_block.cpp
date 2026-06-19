@@ -206,9 +206,7 @@ const GpuTypeInfo* gpuParameterBlockGetNestedTypeInfo(GpuParameterBlock parent, 
     
     if (field->type->kind != GPU_TYPE_KIND_PARAMETER_BLOCK) return NULL;
     
-    // The nested type info would be stored in the field's type
-    // This is a placeholder - actual implementation depends on reflection data structure
-    return NULL;
+    return field->type;
 }
 
 // ============================================================================
@@ -236,10 +234,12 @@ GpuResult gpuParameterBlockUpload(GpuDevice device, GpuParameterBlock block) {
         GpuBufferDesc desc = {};
         desc.size = block->size;
         desc.usage = GPU_BUFFER_USAGE_CONSTANT_BUFFER | GPU_BUFFER_USAGE_COPY_DEST;
-        GpuResult result = gpuCreateBuffer(device, &desc, &block->gpuBuffer);
+        GpuResult result = gpuCreateBufferInit(device, &desc, block->cpuData, &block->gpuBuffer);
         if (result != GPU_OK) {
             return result;
         }
+        block->dirty = false;
+        return GPU_OK;
     }
 
     GpuResult result = gpuUploadToBuffer(device, block->gpuBuffer, block->cpuData, block->size, 0);

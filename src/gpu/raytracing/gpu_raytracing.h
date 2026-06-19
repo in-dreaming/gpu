@@ -6,6 +6,7 @@
 #include "gpu/core/gpu_command.h"
 #include "gpu/core/gpu_format.h"
 #include "gpu/core/gpu_pipeline.h"
+#include "gpu/shader/gpu_shader_compiler.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,10 +39,14 @@ GpuResult gpuBuildAccelerationStructure(GpuCommandBuffer cmd, GpuAccelerationStr
 GpuResult gpuDestroyAccelerationStructure(GpuDevice device, GpuAccelerationStructureHandle as);
 
 typedef struct {
-    const char* rayGenShaderEntry;
-    const char* missShaderEntry;
-    const char* closestHitShaderEntry;
-    GpuAccelerationStructureHandle accelerationStructure;
+    const char* label;
+    GpuShaderBinary rayGenShader;
+    GpuShaderBinary missShader;
+    GpuShaderBinary closestHitShader;
+    GpuShaderBinary anyHitShader;
+    GpuShaderBinary intersectionShader;
+    uint32_t maxRecursion;
+    uint32_t maxRayPayloadSize;
 } GpuRayTracingPipelineDesc;
 
 GpuResult gpuCreateRayTracingPipeline(GpuDevice device, const GpuRayTracingPipelineDesc* desc, GpuPipelineHandle* outPipeline);

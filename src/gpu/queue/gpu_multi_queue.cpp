@@ -86,11 +86,9 @@ GpuResult gpuFenceReset(GpuFence fence, uint64_t value) {
     if (!fence) {
         return GPU_ERROR_INVALID_PARAMETER;
     }
-    
-    // Note: The underlying RHI fence may not support reset
-    // This is a no-op for most implementations
-    (void)fence;
-    (void)value;
+    if (SLANG_FAILED(fence->rhiFence->setCurrentValue(value))) {
+        return GPU_ERROR_INTERNAL;
+    }
     return GPU_OK;
 }
 
@@ -224,9 +222,64 @@ GpuResult gpuSetupComputeToGraphicsSync(GpuCommandQueue computeQueue,
     return result;
 }
 
-// ============================================================================
-// Queue Utilities
-// ============================================================================
+struct GpuQueryPool_t {
+    rhi::ComPtr<rhi::IQueryPool> rhiPool;
+};
+
+GpuResult gpuCreateQueryPool(GpuDevice device, uint32_t queryCount, GpuQueryPool* outPool)
+{
+    if (!device || !outPool || queryCount == 0) return GPU_ERROR_INVALID_PARAMETER;
+
+    rhi::QueryPoolDesc desc = {};
+    desc.type = rhi::QueryType::Timestamp;
+    desc.count = queryCount;
+    desc.label = "timestamp_pool";
+
+    rhi::ComPtr<rhi::IQueryPool> pool;
+    if (SLANG_FAILED(device->rhiDevice->createQueryPool(desc, pool.writeRef()))) {
+        return GPU_ERROR_INTERNAL;
+    }
+
+    GpuQueryPool result = new GpuQueryPool_t();
+    result->rhiPool = pool;
+    *outPool = result;
+    return GPU_OK;
+}
+
+void gpuDestroyQueryPool(GpuDevice device, GpuQueryPool pool)
+{
+    (void)device;
+    if (!pool) return;
+    delete pool;
+}
+
+GpuResult gpuQueryPoolGetResults(GpuQueryPool pool, uint32_t startIndex, uint32_t count, uint64_t* outData)
+{
+    if (!pool || !outData) return GPU_ERROR_INVALID_PARAMETER;
+    return SLANG_SUCCEEDED(pool->rhiPool->getResult(startIndex, count, outData)) ? GPU_OK : GPU_ERROR_INTERNAL;
+}
+
+GpuResult gpuQueryPoolReset(GpuQueryPool pool, uint32_t startIndex, uint32_t count)
+{
+    if (!pool) return GPU_ERROR_INVALID_PARAMETER;
+    return SLANG_SUCCEEDED(pool->rhiPool->reset(startIndex, count)) ? GPU_OK : GPU_ERROR_INTERNAL;
+}
+
+void gpuCmdWriteTimestamp(GpuCommandBuffer cmd, GpuQueryPool pool, uint32_t queryIndex)
+{
+    if (!cmd || !pool) return;
+    if (cmd->rhiEncoder) {
+        cmd->rhiEncoder->writeTimestamp(pool->rhiPool, queryIndex);
+    } else if (cmd->inRenderPass && cmd->renderPassEncoder) {
+        cmd->renderPassEncoder->writeTimestamp(pool->rhiPool, queryIndex);
+    } else if (cmd->inComputePass && cmd->computePassEncoder) {
+        cmd->computePassEncoder->writeTimestamp(pool->rhiPool, queryIndex);
+    } else if (cmd->inRayTracingPass && cmd->rtPassEncoder) {
+        cmd->rtPassEncoder->writeTimestamp(pool->rhiPool, queryIndex);
+    }
+}
+
+
 
 GpuResult gpuQueueWaitIdle(GpuCommandQueue queue) {
     if (!queue) {
