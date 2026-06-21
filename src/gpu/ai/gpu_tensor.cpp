@@ -4,6 +4,54 @@
 #include <string.h>
 #include <stdlib.h>
 
+static bool tensorDescIsValid(const GpuTensorDesc* desc)
+{
+    if (!desc || desc->dimCount == 0 || desc->dimCount > 4) return false;
+    for (uint32_t i = 0; i < desc->dimCount; i++) {
+        if (desc->dims[i] == 0) return false;
+    }
+    return true;
+}
+
+static void fillDefaultStrides(GpuTensorDesc* desc)
+{
+    uint32_t stride = 1;
+    for (int32_t i = (int32_t)desc->dimCount - 1; i >= 0; i--) {
+        if (desc->strides[i] == 0) {
+            desc->strides[i] = stride;
+        }
+        stride *= desc->dims[i];
+    }
+    for (uint32_t i = desc->dimCount; i < 4; i++) {
+        desc->dims[i] = 1;
+        desc->strides[i] = 0;
+    }
+}
+
+static size_t calculateTensorStorageSize(const GpuTensorDesc* desc)
+{
+    if (!tensorDescIsValid(desc)) return 0;
+
+    GpuTensorDesc normalized = *desc;
+    fillDefaultStrides(&normalized);
+
+    size_t maxElementOffset = 0;
+    for (uint32_t i = 0; i < normalized.dimCount; i++) {
+        maxElementOffset += (size_t)(normalized.dims[i] - 1) * normalized.strides[i];
+    }
+    return (maxElementOffset + 1) * gpuGetTensorElementSize(normalized.format);
+}
+
+static void destroyTensorStorage(GpuDevice device, GpuTensorStorage* storage)
+{
+    if (!device || !storage) return;
+    if (storage->refCount > 0) storage->refCount--;
+    if (storage->refCount == 0) {
+        gpuDestroyBuffer(device, storage->bufferHandle);
+        free(storage);
+    }
+}
+
 uint32_t gpuGetTensorElementSize(GpuTensorFormat format)
 {
     switch (format) {
@@ -30,7 +78,7 @@ const char* gpuTensorFormatToString(GpuTensorFormat format)
 
 size_t gpuCalculateTensorSize(const GpuTensorDesc* desc)
 {
-    if (!desc || desc->dimCount == 0 || desc->dimCount > 4) return 0;
+    if (!tensorDescIsValid(desc)) return 0;
 
     size_t totalElements = 1;
     for (uint32_t i = 0; i < desc->dimCount; i++) {
@@ -43,9 +91,12 @@ size_t gpuCalculateTensorSize(const GpuTensorDesc* desc)
 GpuResult gpuCreateTensor(GpuDevice device, const GpuTensorDesc* desc, GpuTensorHandle* outHandle)
 {
     if (!device || !desc || !outHandle) return GPU_ERROR_INVALID_ARGS;
-    if (desc->dimCount == 0 || desc->dimCount > 4) return GPU_ERROR_INVALID_ARGS;
+    if (!tensorDescIsValid(desc)) return GPU_ERROR_INVALID_ARGS;
 
-    size_t size = gpuCalculateTensorSize(desc);
+    GpuTensorDesc normalized = *desc;
+    fillDefaultStrides(&normalized);
+
+    size_t size = calculateTensorStorageSize(&normalized);
     if (size == 0) return GPU_ERROR_INVALID_ARGS;
 
     // Create underlying buffer for tensor data
@@ -60,26 +111,35 @@ GpuResult gpuCreateTensor(GpuDevice device, const GpuTensorDesc* desc, GpuTensor
     }
 
     // Allocate tensor metadata on heap
-    GpuTensorData* tensorData = (GpuTensorData*)malloc(sizeof(GpuTensorData));
-    if (!tensorData) {
+    GpuTensorStorage* storage = (GpuTensorStorage*)malloc(sizeof(GpuTensorStorage));
+    if (!storage) {
         gpuDestroyBuffer(device, bufferHandle);
         return GPU_ERROR_OUT_OF_MEMORY;
     }
+    storage->bufferHandle = bufferHandle;
+    storage->bufferSize = size;
+    storage->refCount = 1;
 
-    tensorData->format = (uint32_t)desc->format;
-    tensorData->dimCount = desc->dimCount;
-    tensorData->bufferSize = size;
-    tensorData->bufferHandle = bufferHandle;
+    GpuTensorData* tensorData = (GpuTensorData*)malloc(sizeof(GpuTensorData));
+    if (!tensorData) {
+        destroyTensorStorage(device, storage);
+        return GPU_ERROR_OUT_OF_MEMORY;
+    }
+
+    tensorData->format = (uint32_t)normalized.format;
+    tensorData->dimCount = normalized.dimCount;
+    tensorData->logicalSize = gpuCalculateTensorSize(&normalized);
+    tensorData->storage = storage;
     
     for (uint32_t i = 0; i < 4; i++) {
-        tensorData->dims[i] = (i < desc->dimCount) ? desc->dims[i] : 1;
-        tensorData->strides[i] = (i < desc->dimCount) ? desc->strides[i] : 0;
+        tensorData->dims[i] = normalized.dims[i];
+        tensorData->strides[i] = normalized.strides[i];
     }
 
     uint32_t index = device->tensorPool.allocate(tensorData);
     if (index == 0) {
         free(tensorData);
-        gpuDestroyBuffer(device, bufferHandle);
+        destroyTensorStorage(device, storage);
         return GPU_ERROR_OUT_OF_MEMORY;
     }
 
@@ -98,10 +158,7 @@ GpuResult gpuDestroyTensor(GpuDevice device, GpuTensorHandle tensor)
     GpuTensorData* data = device->tensorPool.resolve(tensor.index, tensor.generation);
     if (!data) return GPU_ERROR_INVALID_ARGS;
 
-    // Destroy underlying buffer
-    gpuDestroyBuffer(device, data->bufferHandle);
-
-    // Free tensor data
+    destroyTensorStorage(device, data->storage);
     free(data);
 
     // Free tensor slot
@@ -117,7 +174,7 @@ GpuBufferHandle gpuGetTensorBuffer(GpuDevice device, GpuTensorHandle tensor)
     GpuTensorData* data = device->tensorPool.resolve(tensor.index, tensor.generation);
     if (!data) return GPU_NULL_HANDLE;
 
-    return data->bufferHandle;
+    return data->storage ? data->storage->bufferHandle : GPU_NULL_HANDLE;
 }
 
 uint64_t gpuGetTensorBufferSize(GpuDevice device, GpuTensorHandle tensor)
@@ -127,7 +184,7 @@ uint64_t gpuGetTensorBufferSize(GpuDevice device, GpuTensorHandle tensor)
     GpuTensorData* data = device->tensorPool.resolve(tensor.index, tensor.generation);
     if (!data) return 0;
 
-    return (uint64_t)data->bufferSize;
+    return data->storage ? (uint64_t)data->storage->bufferSize : 0;
 }
 
 const GpuTensorData* gpuGetTensorData(GpuDevice device, GpuTensorHandle tensor)
@@ -148,12 +205,12 @@ GpuResult gpuUploadTensor(GpuDevice device, GpuTensorHandle tensor, const void* 
     if (!tensorData) return GPU_ERROR_INVALID_ARGS;
 
     // Validate size doesn't exceed tensor size
-    if (size > tensorData->bufferSize) {
+    if (!tensorData->storage || size > tensorData->logicalSize) {
         return GPU_ERROR_INVALID_ARGS;
     }
 
     // Use buffer upload function
-    return gpuUploadToBuffer(device, tensorData->bufferHandle, data, size, 0);
+    return gpuUploadToBuffer(device, tensorData->storage->bufferHandle, data, size, 0);
 }
 
 GpuResult gpuDownloadTensor(GpuDevice device, GpuTensorHandle tensor, void* outData, size_t size)
@@ -164,12 +221,12 @@ GpuResult gpuDownloadTensor(GpuDevice device, GpuTensorHandle tensor, void* outD
     if (!tensorData) return GPU_ERROR_INVALID_ARGS;
 
     // Validate size doesn't exceed tensor size
-    if (size > tensorData->bufferSize) {
+    if (!tensorData->storage || size > tensorData->logicalSize) {
         return GPU_ERROR_INVALID_ARGS;
     }
 
     // Use buffer download function
-    return gpuDownloadFromBuffer(device, tensorData->bufferHandle, outData, size, 0);
+    return gpuDownloadFromBuffer(device, tensorData->storage->bufferHandle, outData, size, 0);
 }
 
 // ============================================================================
@@ -187,17 +244,17 @@ GpuResult gpuCmdCopyTensor(GpuCommandBuffer cmd, GpuTensorHandle dst, GpuTensorH
 
     if (!srcData || !dstData) return GPU_ERROR_INVALID_ARGS;
 
-    if (dstData->bufferSize < srcData->bufferSize) {
+    if (!srcData->storage || !dstData->storage || dstData->logicalSize < srcData->logicalSize) {
         return GPU_ERROR_INVALID_ARGS;
     }
 
-    rhi::IBuffer* srcBuf = device->bufferPool.resolve(srcData->bufferHandle.index, srcData->bufferHandle.generation);
-    rhi::IBuffer* dstBuf = device->bufferPool.resolve(dstData->bufferHandle.index, dstData->bufferHandle.generation);
+    rhi::IBuffer* srcBuf = device->bufferPool.resolve(srcData->storage->bufferHandle.index, srcData->storage->bufferHandle.generation);
+    rhi::IBuffer* dstBuf = device->bufferPool.resolve(dstData->storage->bufferHandle.index, dstData->storage->bufferHandle.generation);
 
     if (!srcBuf || !dstBuf) return GPU_ERROR_INVALID_ARGS;
 
     if (cmd->rhiEncoder) {
-        cmd->rhiEncoder->copyBuffer(dstBuf, 0, srcBuf, 0, srcData->bufferSize);
+        cmd->rhiEncoder->copyBuffer(dstBuf, 0, srcBuf, 0, srcData->logicalSize);
     }
 
     return GPU_SUCCESS;
@@ -216,11 +273,13 @@ GpuResult gpuCmdFillTensor(GpuCommandBuffer cmd, GpuTensorHandle tensor, float /
     GpuTensorData* tensorData = device->tensorPool.resolve(tensor.index, tensor.generation);
     if (!tensorData) return GPU_ERROR_INVALID_ARGS;
 
-    rhi::IBuffer* buf = device->bufferPool.resolve(tensorData->bufferHandle.index, tensorData->bufferHandle.generation);
+    if (!tensorData->storage) return GPU_ERROR_INVALID_ARGS;
+
+    rhi::IBuffer* buf = device->bufferPool.resolve(tensorData->storage->bufferHandle.index, tensorData->storage->bufferHandle.generation);
     if (!buf) return GPU_ERROR_INVALID_ARGS;
 
     if (cmd->rhiEncoder) {
-        cmd->rhiEncoder->clearBuffer(buf, 0, tensorData->bufferSize);
+        cmd->rhiEncoder->clearBuffer(buf, 0, tensorData->storage->bufferSize);
     }
 
     return GPU_SUCCESS;
@@ -233,18 +292,23 @@ GpuResult gpuCmdFillTensor(GpuCommandBuffer cmd, GpuTensorHandle tensor, float /
 GpuResult gpuCreateTensorView(GpuDevice device, GpuTensorHandle src, const GpuTensorDesc* viewDesc, GpuTensorHandle* outView)
 {
     if (!device || !src.index || !viewDesc || !outView) return GPU_ERROR_INVALID_ARGS;
-    if (viewDesc->dimCount == 0 || viewDesc->dimCount > 4) return GPU_ERROR_INVALID_ARGS;
+    if (!tensorDescIsValid(viewDesc)) return GPU_ERROR_INVALID_ARGS;
 
     // Resolve source tensor
     GpuTensorData* srcData = device->tensorPool.resolve(src.index, src.generation);
     if (!srcData) return GPU_ERROR_INVALID_ARGS;
 
-    // Calculate expected size for the view
-    size_t viewSize = gpuCalculateTensorSize(viewDesc);
-    if (viewSize == 0) return GPU_ERROR_INVALID_ARGS;
+    if (!srcData->storage) return GPU_ERROR_INVALID_ARGS;
+
+    GpuTensorDesc normalized = *viewDesc;
+    fillDefaultStrides(&normalized);
+
+    size_t logicalSize = gpuCalculateTensorSize(&normalized);
+    size_t requiredSize = calculateTensorStorageSize(&normalized);
+    if (logicalSize == 0 || requiredSize == 0) return GPU_ERROR_INVALID_ARGS;
 
     // Validate view fits within source buffer
-    if (viewSize > srcData->bufferSize) {
+    if (requiredSize > srcData->storage->bufferSize) {
         return GPU_ERROR_INVALID_ARGS;
     }
 
@@ -252,22 +316,21 @@ GpuResult gpuCreateTensorView(GpuDevice device, GpuTensorHandle src, const GpuTe
     GpuTensorData* viewData = (GpuTensorData*)malloc(sizeof(GpuTensorData));
     if (!viewData) return GPU_ERROR_OUT_OF_MEMORY;
 
-    // Copy format and dimensions from viewDesc
-    viewData->format = (uint32_t)viewDesc->format;
-    viewData->dimCount = viewDesc->dimCount;
-    viewData->bufferSize = viewSize;
-
-    // Share the same buffer handle (not a copy!)
-    viewData->bufferHandle = srcData->bufferHandle;
+    viewData->format = (uint32_t)normalized.format;
+    viewData->dimCount = normalized.dimCount;
+    viewData->logicalSize = logicalSize;
+    viewData->storage = srcData->storage;
+    viewData->storage->refCount++;
 
     // Copy dimensions and strides
     for (uint32_t i = 0; i < 4; i++) {
-        viewData->dims[i] = (i < viewDesc->dimCount) ? viewDesc->dims[i] : 1;
-        viewData->strides[i] = (i < viewDesc->dimCount) ? viewDesc->strides[i] : 0;
+        viewData->dims[i] = normalized.dims[i];
+        viewData->strides[i] = normalized.strides[i];
     }
 
     uint32_t index = device->tensorPool.allocate(viewData);
     if (index == 0) {
+        viewData->storage->refCount--;
         free(viewData);
         return GPU_ERROR_OUT_OF_MEMORY;
     }

@@ -11,6 +11,14 @@
 #include <map>
 #include <mutex>
 #include <string>
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4267)
+#endif
+#include <slang-rhi/shader-cursor.h>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -25,15 +33,10 @@
 
 extern rhi::IComputePipeline* gpuResolveComputePipeline(GpuDevice device, GpuPipelineHandle pipeline);
 
-static const char* s_matmulShaderSource = R"(
-struct PushConstants
-{
-    uint M;
-    uint N;
-    uint K;
-};
-
-[[vk::push_constant]] ConstantBuffer<PushConstants> pc;
+static const char* s_matmulShaderFormat = R"(
+static const uint MATMUL_M = %u;
+static const uint MATMUL_N = %u;
+static const uint MATMUL_K = %u;
 
 RWStructuredBuffer<float> bufferA;
 RWStructuredBuffer<float> bufferB;
@@ -45,16 +48,16 @@ void main(uint3 threadID : SV_DispatchThreadID)
     uint row = threadID.y;
     uint col = threadID.x;
 
-    if (row >= pc.M || col >= pc.N)
+    if (row >= MATMUL_M || col >= MATMUL_N)
         return;
 
     float sum = 0.0;
-    for (uint k = 0; k < pc.K; k++) {
-        float a = bufferA[row * pc.K + k];
-        float b = bufferB[k * pc.N + col];
+    for (uint k = 0; k < MATMUL_K; k++) {
+        float a = bufferA[row * MATMUL_K + k];
+        float b = bufferB[k * MATMUL_N + col];
         sum += a * b;
     }
-    bufferC[row * pc.N + col] = sum;
+    bufferC[row * MATMUL_N + col] = sum;
 }
 )";
 
@@ -87,10 +90,31 @@ static bool writeShaderToTempFile(const char* content, std::string& outPath) {
     return true;
 }
 
+static std::string makeMatmulShaderSource(uint32_t m, uint32_t n, uint32_t k)
+{
+    int needed = snprintf(nullptr, 0, s_matmulShaderFormat, m, n, k);
+    if (needed <= 0) return std::string();
+    std::string source((size_t)needed, '\0');
+    snprintf(source.data(), source.size() + 1, s_matmulShaderFormat, m, n, k);
+    return source;
+}
+
+static bool setCursorBufferIfValid(rhi::ShaderCursor cursor, const char* name, rhi::IBuffer* buffer)
+{
+    rhi::ShaderCursor field = cursor[name];
+    if (!field.isValid()) return false;
+    return SLANG_SUCCEEDED(field.setBinding(rhi::Binding(buffer)));
+}
+
 GpuResult gpuCreateMatmulPipeline(GpuDevice device, const GpuMatmulDesc* desc, GpuPipelineHandle* outPipeline)
 {
     if (!device || !desc || !outPipeline) return GPU_ERROR_INVALID_ARGS;
     if (desc->m == 0 || desc->n == 0 || desc->k == 0) return GPU_ERROR_INVALID_ARGS;
+    if (desc->aFormat != GPU_TENSOR_FORMAT_F32 ||
+        desc->bFormat != GPU_TENSOR_FORMAT_F32 ||
+        desc->cFormat != GPU_TENSOR_FORMAT_F32) {
+        return GPU_ERROR_NOT_SUPPORTED;
+    }
 
     std::lock_guard<std::mutex> lock(s_matmulMutex);
     std::string key = matmulCacheKey(desc->m, desc->n, desc->k);
@@ -114,7 +138,8 @@ GpuResult gpuCreateMatmulPipeline(GpuDevice device, const GpuMatmulDesc* desc, G
     }
 
     std::string shaderPath;
-    if (!writeShaderToTempFile(s_matmulShaderSource, shaderPath)) {
+    std::string shaderSource = makeMatmulShaderSource(desc->m, desc->n, desc->k);
+    if (shaderSource.empty() || !writeShaderToTempFile(shaderSource.c_str(), shaderPath)) {
         fprintf(stderr, "gpuCreateMatmulPipeline: failed to write temp shader\n");
         gpuDestroyShaderCompiler(entry.compiler);
         entry.compiler = NULL;
@@ -183,7 +208,34 @@ void gpuCmdMatmul(GpuCommandBuffer cmd, GpuPipelineHandle matmulPipeline, const 
             if (cmd->inComputePass && cmd->computePassEncoder) {
                 rhi::IComputePipeline* pipe = gpuResolveComputePipeline(cmd->device, matmulPipeline);
                 if (pipe) {
-                    cmd->computePassEncoder->bindPipeline(pipe);
+                    rhi::IBuffer* rhiA = device->bufferPool.resolve(bufferA.index, bufferA.generation);
+                    rhi::IBuffer* rhiB = device->bufferPool.resolve(bufferB.index, bufferB.generation);
+                    rhi::IBuffer* rhiC = device->bufferPool.resolve(bufferC.index, bufferC.generation);
+                    if (!rhiA || !rhiB || !rhiC) return;
+
+                    rhi::ComPtr<rhi::IShaderObject> rootObject = device->rhiDevice->createRootShaderObject(pipe);
+                    if (!rootObject) return;
+
+                    rhi::ShaderCursor rootCursor(rootObject);
+                    bool boundA = setCursorBufferIfValid(rootCursor, "bufferA", rhiA);
+                    bool boundB = setCursorBufferIfValid(rootCursor, "bufferB", rhiB);
+                    bool boundC = setCursorBufferIfValid(rootCursor, "bufferC", rhiC);
+
+                    rhi::IShaderObject* entryPointObject = rootObject->getEntryPoint(0);
+                    if (entryPointObject) {
+                        rhi::ShaderCursor entryCursor(entryPointObject);
+                        if (!boundA) boundA = setCursorBufferIfValid(entryCursor, "bufferA", rhiA);
+                        if (!boundB) boundB = setCursorBufferIfValid(entryCursor, "bufferB", rhiB);
+                        if (!boundC) boundC = setCursorBufferIfValid(entryCursor, "bufferC", rhiC);
+                    }
+
+                    if (!boundA || !boundB || !boundC) {
+                        fprintf(stderr, "gpuCmdMatmul: failed to bind shader parameters (A=%d B=%d C=%d)\n",
+                                boundA ? 1 : 0, boundB ? 1 : 0, boundC ? 1 : 0);
+                        return;
+                    }
+
+                    cmd->computePassEncoder->bindPipeline(pipe, rootObject);
                 }
 
                 uint32_t dispatchX = (entry.n + 15) / 16;

@@ -53,7 +53,10 @@ int main(void)
     GpuWorkGraph wg;
     res = gpuCreateWorkGraph(device, &wgDesc, &wg);
     if (res != GPU_SUCCESS) {
-        printf("Note: gpuCreateWorkGraph returned %d (expected NOT_SUPPORTED in stub)\n", res);
+        printf("Work Graph fallback creation failed: %d\n", res);
+        gpuDestroyDevice(device);
+        gpuPlatformShutdown();
+        return 1;
     }
 
     printf("Work Graph configuration created: Cull -> Draw\n");

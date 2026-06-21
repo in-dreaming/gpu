@@ -45,10 +45,10 @@ int main(void)
         .allowUpdate = false
     };
 
-    GpuAccelerationStructureHandle blas;
+    GpuAccelerationStructureHandle blas = {0, 0};
     res = gpuCreateBottomLevelAS(device, &blasDesc, &blas);
     if (res != GPU_SUCCESS) {
-        printf("Note: gpuCreateBottomLevelAS returned %d (expected NOT_SUPPORTED in stub)\n", res);
+        printf("BLAS creation failed for the demo geometry: %d\n", res);
     }
 
     GpuTopLevelASDesc tlasDesc = {
@@ -56,10 +56,10 @@ int main(void)
         .instanceBuffer = {0, 0}
     };
 
-    GpuAccelerationStructureHandle tlas;
+    GpuAccelerationStructureHandle tlas = {0, 0};
     res = gpuCreateTopLevelAS(device, &tlasDesc, &tlas);
     if (res != GPU_SUCCESS) {
-        printf("Note: gpuCreateTopLevelAS returned %d (expected NOT_SUPPORTED in stub)\n", res);
+        printf("TLAS creation failed for the demo instance buffer: %d\n", res);
     }
 
     printf("Acceleration structures configured.\n");

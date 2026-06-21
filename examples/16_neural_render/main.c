@@ -31,7 +31,10 @@ int main(void)
     GpuNeuralNetwork neuralNet;
     res = gpuCreateNeuralNetwork(device, &nnDesc, &neuralNet);
     if (res != GPU_SUCCESS) {
-        printf("Note: gpuCreateNeuralNetwork returned %d (expected NOT_SUPPORTED in stub)\n", res);
+        printf("Neural network creation unavailable on this backend/configuration: %d\n", res);
+        gpuDestroyDevice(device);
+        gpuPlatformShutdown();
+        return 1;
     }
 
     GpuTensorDesc inputDesc = {
@@ -47,9 +50,25 @@ int main(void)
         .strides = {256*256*3, 256*3, 3, 1}
     };
 
-    GpuTensorHandle inputTensor, outputTensor;
+    GpuTensorHandle inputTensor = {0, 0};
+    GpuTensorHandle outputTensor = {0, 0};
     res = gpuCreateTensor(device, &inputDesc, &inputTensor);
+    if (res != GPU_SUCCESS) {
+        printf("Input tensor creation failed: %d\n", res);
+        gpuDestroyNeuralNetwork(device, neuralNet);
+        gpuDestroyDevice(device);
+        gpuPlatformShutdown();
+        return 1;
+    }
     res = gpuCreateTensor(device, &outputDesc, &outputTensor);
+    if (res != GPU_SUCCESS) {
+        printf("Output tensor creation failed: %d\n", res);
+        gpuDestroyTensor(device, inputTensor);
+        gpuDestroyNeuralNetwork(device, neuralNet);
+        gpuDestroyDevice(device);
+        gpuPlatformShutdown();
+        return 1;
+    }
 
     printf("Network config: input=%dx%dx%d, hidden=%d, output=%d channels\n",
            nnDesc.inputWidth, nnDesc.inputHeight, nnDesc.inputWidth,

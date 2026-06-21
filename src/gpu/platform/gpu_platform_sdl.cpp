@@ -103,6 +103,10 @@ static GpuPlatformEventType translateEventType(SDL_EventType type)
         return GPU_PLATFORM_EVENT_KEY_UP;
     case SDL_EVENT_MOUSE_MOTION:
         return GPU_PLATFORM_EVENT_MOUSE_MOVE;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        return GPU_PLATFORM_EVENT_MOUSE_BUTTON_DOWN;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        return GPU_PLATFORM_EVENT_MOUSE_BUTTON_UP;
     default:
         return (GpuPlatformEventType)-1;
     }
@@ -130,6 +134,17 @@ bool gpuPollEvent(GpuPlatformEvent* outEvent)
         case GPU_PLATFORM_EVENT_MOUSE_MOVE:
             outEvent->mouse.x = (int32_t)sdlEvent.motion.x;
             outEvent->mouse.y = (int32_t)sdlEvent.motion.y;
+            outEvent->mouse.dx = (int32_t)sdlEvent.motion.xrel;
+            outEvent->mouse.dy = (int32_t)sdlEvent.motion.yrel;
+            outEvent->mouse.button = 0;
+            return true;
+        case GPU_PLATFORM_EVENT_MOUSE_BUTTON_DOWN:
+        case GPU_PLATFORM_EVENT_MOUSE_BUTTON_UP:
+            outEvent->mouse.x = (int32_t)sdlEvent.button.x;
+            outEvent->mouse.y = (int32_t)sdlEvent.button.y;
+            outEvent->mouse.dx = 0;
+            outEvent->mouse.dy = 0;
+            outEvent->mouse.button = (uint32_t)sdlEvent.button.button;
             return true;
         case GPU_PLATFORM_EVENT_QUIT:
             return true;

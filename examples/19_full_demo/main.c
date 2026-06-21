@@ -72,7 +72,7 @@ int main(int argc, char** argv)
     GpuNeuralNetwork neuralNet = NULL;
     res = gpuCreateNeuralNetwork(device, &nnDesc, &neuralNet);
     printf("   Neural Network: %s\n",
-           res == GPU_SUCCESS ? "created" : "not supported (stub)");
+           res == GPU_SUCCESS ? "created" : "unavailable on this backend/configuration");
 
     printf("\n5. Configuring Work Graph...\n");
 

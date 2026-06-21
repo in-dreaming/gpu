@@ -4,6 +4,7 @@
 #include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_internal.h"
 #include <vector>
+#include <cstdlib>
 
 GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
 {
@@ -49,6 +50,24 @@ void gpuDestroyDevice(GpuDevice device)
     if (!device) return;
 
     constexpr uint32_t poolCap = GpuHandlePool<int>::capacity();
+
+    for (uint32_t i = 1; i < poolCap; i++) {
+        auto& slot = device->tensorPool.slots[i];
+        if (slot.alive && slot.ptr) {
+            GpuTensorData* data = slot.ptr;
+            GpuTensorStorage* storage = data->storage;
+            if (storage) {
+                if (storage->refCount > 0) storage->refCount--;
+                if (storage->refCount == 0) {
+                    gpuDestroyBuffer(device, storage->bufferHandle);
+                    free(storage);
+                }
+            }
+            free(data);
+            slot.ptr = nullptr;
+            slot.alive = false;
+        }
+    }
 
     for (uint32_t i = 1; i < poolCap; i++) {
         auto& slot = device->pipelinePool.slots[i];

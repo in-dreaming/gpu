@@ -15,6 +15,7 @@ option(GPU_ENABLE_WEBGPU "Enable WebGPU backend" OFF)
 option(GPU_BUILD_EXAMPLES "Build examples" ON)
 option(GPU_BUILD_TESTS "Build tests" ON)
 option(GPU_INSTALL "Enable install rules" ON)
+set(GPU_SPONZA_ROOT "" CACHE PATH "Optional path to jimmiebergmann/Sponza assets for example 21")
 
 include(CTest)
 

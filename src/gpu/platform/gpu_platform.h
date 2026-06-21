@@ -33,6 +33,8 @@ typedef enum {
     GPU_PLATFORM_EVENT_KEY_DOWN = 2,
     GPU_PLATFORM_EVENT_KEY_UP = 3,
     GPU_PLATFORM_EVENT_MOUSE_MOVE = 4,
+    GPU_PLATFORM_EVENT_MOUSE_BUTTON_DOWN = 5,
+    GPU_PLATFORM_EVENT_MOUSE_BUTTON_UP = 6,
 } GpuPlatformEventType;
 
 typedef struct {
@@ -40,7 +42,7 @@ typedef struct {
     union {
         struct { uint32_t width; uint32_t height; } resize;
         struct { uint32_t keycode; } key;
-        struct { int32_t x; int32_t y; } mouse;
+        struct { int32_t x; int32_t y; int32_t dx; int32_t dy; uint32_t button; } mouse;
     };
 } GpuPlatformEvent;
 

@@ -119,13 +119,19 @@ struct GpuAccelerationStructure_t {
 };
 
 // Tensor data structure (defined here to avoid circular includes)
+struct GpuTensorStorage {
+    size_t bufferSize;
+    GpuBufferHandle bufferHandle;
+    uint32_t refCount;
+};
+
 struct GpuTensorData {
     uint32_t format;        // GpuTensorFormat
     uint32_t dimCount;
     uint32_t dims[4];
     uint32_t strides[4];
-    size_t bufferSize;
-    GpuBufferHandle bufferHandle;  // Handle to underlying buffer
+    size_t logicalSize;
+    GpuTensorStorage* storage;
 };
 
 static inline rhi::Format gpuFormatToRhi(GpuFormat fmt)
