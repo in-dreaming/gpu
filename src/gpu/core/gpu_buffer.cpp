@@ -2,6 +2,18 @@
 #include "gpu/core/gpu_device.h"
 #include "gpu/core/gpu_internal.h"
 
+static GpuResourceState gpuDefaultBufferState(GpuBufferUsage usage)
+{
+    if (usage & GPU_BUFFER_USAGE_UNORDERED_ACCESS) return GPU_RESOURCE_STATE_UNORDERED_ACCESS;
+    if (usage & GPU_BUFFER_USAGE_SHADER_RESOURCE) return GPU_RESOURCE_STATE_SHADER_RESOURCE;
+    if (usage & GPU_BUFFER_USAGE_CONSTANT_BUFFER) return GPU_RESOURCE_STATE_CONSTANT_BUFFER;
+    if (usage & GPU_BUFFER_USAGE_VERTEX_BUFFER) return GPU_RESOURCE_STATE_VERTEX_BUFFER;
+    if (usage & GPU_BUFFER_USAGE_INDEX_BUFFER) return GPU_RESOURCE_STATE_INDEX_BUFFER;
+    if (usage & GPU_BUFFER_USAGE_COPY_DEST) return GPU_RESOURCE_STATE_COPY_DEST;
+    if (usage & GPU_BUFFER_USAGE_COPY_SOURCE) return GPU_RESOURCE_STATE_COPY_SOURCE;
+    return GPU_RESOURCE_STATE_COMMON;
+}
+
 GpuResult gpuCreateBuffer(GpuDevice device, const GpuBufferDesc* desc, GpuBufferHandle* outHandle)
 {
     if (!device || !desc || !outHandle) return GPU_ERROR_INVALID_ARGS;
@@ -29,6 +41,7 @@ GpuResult gpuCreateBuffer(GpuDevice device, const GpuBufferDesc* desc, GpuBuffer
 
     outHandle->index = idx;
     outHandle->generation = device->bufferPool.slots[idx].generation;
+    device->bufferStates[idx] = gpuDefaultBufferState(desc->usage);
     return GPU_SUCCESS;
 }
 
@@ -59,6 +72,7 @@ GpuResult gpuCreateBufferInit(GpuDevice device, const GpuBufferDesc* desc, const
 
     outHandle->index = idx;
     outHandle->generation = device->bufferPool.slots[idx].generation;
+    device->bufferStates[idx] = gpuDefaultBufferState(desc->usage);
     return GPU_SUCCESS;
 }
 
@@ -69,7 +83,11 @@ GpuResult gpuDestroyBuffer(GpuDevice device, GpuBufferHandle handle)
     rhi::IBuffer* buf = device->bufferPool.resolve(handle.index, handle.generation);
     if (!buf) return GPU_ERROR_INVALID_ARGS;
 
+    if (device->graphicsQueue) {
+        device->graphicsQueue->waitOnHost();
+    }
     buf->release();
+    device->bufferStates[handle.index] = GPU_RESOURCE_STATE_UNDEFINED;
     device->bufferPool.release(handle.index, handle.generation);
     return GPU_SUCCESS;
 }

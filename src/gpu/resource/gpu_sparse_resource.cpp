@@ -33,6 +33,14 @@ static std::map<uint64_t, SparseTextureState> s_sparseTextures;
 static std::map<uint64_t, SparseBufferState> s_sparseBuffers;
 static std::mutex s_sparseMutex;
 
+static bool gpuSparseSupported(GpuDevice device)
+{
+    if (!device) return false;
+    GpuCapabilities caps = {};
+    gpuGetCapabilities(device, &caps);
+    return caps.supportSparseResource;
+}
+
 GpuResult gpuGetSparseTextureProperties(GpuDevice device,
                                         GpuFormat /*format*/,
                                         uint32_t width,
@@ -42,6 +50,7 @@ GpuResult gpuGetSparseTextureProperties(GpuDevice device,
                                         GpuSparseTextureProperties* outProps)
 {
     if (!device || !outProps) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     outProps->tileWidth = 64;
     outProps->tileHeight = 64;
@@ -73,6 +82,7 @@ GpuResult gpuSparseReserve(GpuDevice device,
                             const GpuSparseTileCoord* tiles)
 {
     if (!device || !gpuHandleIsValid(texture) || !tiles || tileCount == 0) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     uint64_t key = ((uint64_t)texture.index << 32) | texture.generation;
@@ -112,6 +122,7 @@ GpuResult gpuSparseRelease(GpuDevice device,
                             const GpuSparseTileCoord* tiles)
 {
     if (!device || !gpuHandleIsValid(texture) || !tiles || tileCount == 0) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     uint64_t key = ((uint64_t)texture.index << 32) | texture.generation;
@@ -134,6 +145,7 @@ GpuResult gpuSparseMap(GpuDevice device,
                        uint64_t offset)
 {
     if (!device || !gpuHandleIsValid(texture) || !tile) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     uint64_t key = ((uint64_t)texture.index << 32) | texture.generation;
@@ -169,6 +181,7 @@ GpuResult gpuSparseUnmap(GpuDevice device,
                           const GpuSparseTileCoord* tile)
 {
     if (!device || !gpuHandleIsValid(texture) || !tile) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     sparseUnmapLocked(device, texture, tile);
@@ -183,6 +196,7 @@ GpuResult gpuSparseMapMultiple(GpuDevice device,
                                 const uint64_t* offsets)
 {
     if (!device || !gpuHandleIsValid(texture) || !tiles || !offsets) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     GpuResult result = GPU_SUCCESS;
     for (uint32_t i = 0; i < tileCount; i++) {
@@ -198,6 +212,7 @@ GpuResult gpuGetSparseBufferProperties(GpuDevice device,
                                         uint32_t* outPageCount)
 {
     if (!device) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     uint32_t pageSize = 65536;
     uint32_t pageCount = (uint32_t)((size + pageSize - 1) / pageSize);
@@ -214,6 +229,7 @@ GpuResult gpuCreateSparseBuffer(GpuDevice device,
                                   GpuBufferHandle* outBuffer)
 {
     if (!device || !outBuffer || size == 0) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     GpuBufferDesc desc = {};
     desc.size = size;
@@ -240,6 +256,7 @@ GpuResult gpuSparseBufferMap(GpuDevice device,
                                uint64_t /*offset*/)
 {
     if (!device || !gpuHandleIsValid(sparseBuffer) || !gpuHandleIsValid(backingMemory)) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     rhi::IBuffer* dstBuf = device->bufferPool.resolve(sparseBuffer.index, sparseBuffer.generation);
     rhi::IBuffer* srcBuf = device->bufferPool.resolve(backingMemory.index, backingMemory.generation);
@@ -261,6 +278,7 @@ GpuResult gpuSparseBufferUnmap(GpuDevice device,
                                  uint64_t /*pageIndex*/)
 {
     if (!device || !gpuHandleIsValid(sparseBuffer)) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     uint64_t key = ((uint64_t)sparseBuffer.index << 32) | sparseBuffer.generation;
@@ -313,6 +331,7 @@ GpuResult gpuSparseGetTextureStats(GpuDevice device,
                                      GpuSparseTextureStats* outStats)
 {
     if (!device || !gpuHandleIsValid(texture) || !outStats) return GPU_ERROR_INVALID_ARGS;
+    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
 
     memset(outStats, 0, sizeof(GpuSparseTextureStats));
 

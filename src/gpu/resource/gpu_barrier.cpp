@@ -28,6 +28,7 @@ void gpuCmdSetBufferState(GpuDevice device, GpuCommandEncoder encoder, GpuBuffer
     rhi::IBuffer* rhiBuf = device->bufferPool.resolve(buffer.index, buffer.generation);
     if (!rhiBuf) return;
     encoder->rhiEncoder->setBufferState(rhiBuf, gpuResourceStateToRhi(state));
+    device->bufferStates[buffer.index] = state;
 }
 
 void gpuCmdSetTextureState(GpuDevice device, GpuCommandEncoder encoder, GpuTextureHandle texture, GpuResourceState state)
@@ -36,10 +37,25 @@ void gpuCmdSetTextureState(GpuDevice device, GpuCommandEncoder encoder, GpuTextu
     rhi::ITexture* rhiTex = device->texturePool.resolve(texture.index, texture.generation);
     if (!rhiTex) return;
     encoder->rhiEncoder->setTextureState(rhiTex, gpuResourceStateToRhi(state));
+    device->textureStates[texture.index] = state;
 }
 
 void gpuCmdGlobalBarrier(GpuCommandEncoder encoder)
 {
     if (!encoder) return;
     encoder->rhiEncoder->globalBarrier();
+}
+
+GpuResourceState gpuGetBufferState(GpuDevice device, GpuBufferHandle buffer)
+{
+    if (!device || buffer.index == 0) return GPU_RESOURCE_STATE_UNDEFINED;
+    if (!device->bufferPool.resolve(buffer.index, buffer.generation)) return GPU_RESOURCE_STATE_UNDEFINED;
+    return device->bufferStates[buffer.index];
+}
+
+GpuResourceState gpuGetTextureState(GpuDevice device, GpuTextureHandle texture)
+{
+    if (!device || texture.index == 0) return GPU_RESOURCE_STATE_UNDEFINED;
+    if (!device->texturePool.resolve(texture.index, texture.generation)) return GPU_RESOURCE_STATE_UNDEFINED;
+    return device->textureStates[texture.index];
 }

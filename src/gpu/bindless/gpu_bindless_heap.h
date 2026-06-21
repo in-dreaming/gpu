@@ -20,11 +20,19 @@ typedef struct {
     GpuDescriptorType descriptorType;
 } GpuBindlessHeapDesc;
 
+typedef struct {
+    uint32_t type;
+    uint64_t value;
+} GpuDescriptorHandleInfo;
+
 GpuResult gpuCreateBindlessHeap(GpuDevice device, const GpuBindlessHeapDesc* desc, GpuBindlessHeap* outHeap);
 void gpuDestroyBindlessHeap(GpuBindlessHeap heap);
 
 uint32_t gpuBindlessAllocate(GpuBindlessHeap heap, GpuHandle resource);
 void gpuBindlessFree(GpuBindlessHeap heap, uint32_t index);
+bool gpuBindlessIsAllocated(GpuBindlessHeap heap, uint32_t index);
+GpuResult gpuBindlessGetResource(GpuBindlessHeap heap, uint32_t index, GpuHandle* outResource);
+GpuResult gpuBindlessGetDescriptorHandle(GpuBindlessHeap heap, uint32_t index, GpuDescriptorHandleInfo* outInfo);
 
 uint32_t gpuGetBindlessIndex(GpuDevice device, GpuHandle handle);
 

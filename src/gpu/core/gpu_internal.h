@@ -6,6 +6,7 @@
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_handle_pool.h"
+#include "gpu/resource/gpu_barrier.h"
 
 // Forward declaration
 struct GpuTensorData;
@@ -23,6 +24,8 @@ struct GpuDevice_t {
     GpuHandlePool<rhi::IFence> fencePool;
     GpuHandlePool<rhi::IAccelerationStructure> accelStructPool;
     GpuHandlePool<GpuTensorData> tensorPool;
+    GpuResourceState bufferStates[GpuHandlePool<rhi::IBuffer>::capacity()] = {};
+    GpuResourceState textureStates[GpuHandlePool<rhi::ITexture>::capacity()] = {};
 };
 
 struct GpuCommandEncoder_t {

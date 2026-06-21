@@ -2,6 +2,32 @@
 #include "gpu/core/gpu_device.h"
 #include "gpu/core/gpu_internal.h"
 
+static GpuResourceState gpuDefaultTextureState(GpuTextureUsage usage)
+{
+    if (usage & GPU_TEXTURE_USAGE_UNORDERED_ACCESS) return GPU_RESOURCE_STATE_UNORDERED_ACCESS;
+    if (usage & GPU_TEXTURE_USAGE_RENDER_TARGET) return GPU_RESOURCE_STATE_RENDER_TARGET;
+    if (usage & GPU_TEXTURE_USAGE_DEPTH_STENCIL) return GPU_RESOURCE_STATE_DEPTH_WRITE;
+    if (usage & GPU_TEXTURE_USAGE_PRESENT) return GPU_RESOURCE_STATE_PRESENT;
+    if (usage & GPU_TEXTURE_USAGE_SHADER_RESOURCE) return GPU_RESOURCE_STATE_SHADER_RESOURCE;
+    if (usage & GPU_TEXTURE_USAGE_COPY_DEST) return GPU_RESOURCE_STATE_COPY_DEST;
+    if (usage & GPU_TEXTURE_USAGE_COPY_SOURCE) return GPU_RESOURCE_STATE_COPY_SOURCE;
+    return GPU_RESOURCE_STATE_COMMON;
+}
+
+static rhi::ResourceState gpuDefaultTextureRhiState(GpuTextureUsage usage)
+{
+    switch (gpuDefaultTextureState(usage)) {
+    case GPU_RESOURCE_STATE_UNORDERED_ACCESS: return rhi::ResourceState::UnorderedAccess;
+    case GPU_RESOURCE_STATE_RENDER_TARGET:    return rhi::ResourceState::RenderTarget;
+    case GPU_RESOURCE_STATE_DEPTH_WRITE:      return rhi::ResourceState::DepthWrite;
+    case GPU_RESOURCE_STATE_PRESENT:          return rhi::ResourceState::Present;
+    case GPU_RESOURCE_STATE_SHADER_RESOURCE:  return rhi::ResourceState::ShaderResource;
+    case GPU_RESOURCE_STATE_COPY_DEST:        return rhi::ResourceState::CopyDestination;
+    case GPU_RESOURCE_STATE_COPY_SOURCE:      return rhi::ResourceState::CopySource;
+    default:                                  return rhi::ResourceState::General;
+    }
+}
+
 GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuTextureHandle* outHandle)
 {
     if (!device || !desc || !outHandle) return GPU_ERROR_INVALID_ARGS;
@@ -17,7 +43,7 @@ GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuText
     rhiDesc.format = gpuFormatToRhi(desc->format);
     rhiDesc.sampleCount = desc->sampleCount > 0 ? desc->sampleCount : 1;
     rhiDesc.usage = static_cast<rhi::TextureUsage>(gpuTextureUsageToRhi(desc->usage));
-    rhiDesc.defaultState = rhi::ResourceState::RenderTarget;
+    rhiDesc.defaultState = gpuDefaultTextureRhiState(desc->usage);
     rhiDesc.label = desc->label;
     rhiDesc.memoryType = rhi::MemoryType::DeviceLocal;
 
@@ -36,6 +62,7 @@ GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuText
 
     outHandle->index = idx;
     outHandle->generation = device->texturePool.slots[idx].generation;
+    device->textureStates[idx] = gpuDefaultTextureState(desc->usage);
     return GPU_SUCCESS;
 }
 
@@ -46,7 +73,11 @@ GpuResult gpuDestroyTexture(GpuDevice device, GpuTextureHandle handle)
     rhi::ITexture* tex = device->texturePool.resolve(handle.index, handle.generation);
     if (!tex) return GPU_ERROR_INVALID_ARGS;
 
+    if (device->graphicsQueue) {
+        device->graphicsQueue->waitOnHost();
+    }
     tex->release();
+    device->textureStates[handle.index] = GPU_RESOURCE_STATE_UNDEFINED;
     device->texturePool.release(handle.index, handle.generation);
     return GPU_SUCCESS;
 }
@@ -91,6 +122,9 @@ GpuResult gpuDestroyTextureView(GpuDevice device, GpuTextureHandle viewHandle)
     rhi::ITextureView* view = device->textureViewPool.resolve(viewHandle.index, viewHandle.generation);
     if (!view) return GPU_ERROR_INVALID_ARGS;
 
+    if (device->graphicsQueue) {
+        device->graphicsQueue->waitOnHost();
+    }
     view->release();
     device->textureViewPool.release(viewHandle.index, viewHandle.generation);
     return GPU_SUCCESS;

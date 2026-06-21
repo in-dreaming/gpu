@@ -75,19 +75,8 @@ void ensureComputePass(GpuCommandBuffer_t* buf) {
 
 void ensureRenderPass(GpuCommandBuffer_t* buf) {
     if (!buf || buf->inRenderPass) return;
-    if (!buf->rhiEncoder) return;
-    rhi::RenderPassDesc rpDesc = {};
-    buf->renderPassEncoder = buf->rhiEncoder->beginRenderPass(rpDesc);
-    if (buf->renderPassEncoder) {
-        buf->inRenderPass = true;
-        if (buf->boundPipeline.index) {
-            rhi::IRenderPipeline* pipe = gpuResolveRenderPipeline(buf->device, buf->boundPipeline);
-            if (pipe) {
-                buf->rootShaderObject = buf->renderPassEncoder->bindPipeline(pipe);
-            }
-        }
-        applyPendingBinds(buf);
-    }
+    // A graphics pass needs explicit attachments. Creating an empty render pass
+    // makes invalid draw streams look successful while producing undefined output.
 }
 
 void gpuCmdBindPipeline(GpuCommandBuffer cmd, GpuPipelineHandle pipeline) {
@@ -105,9 +94,7 @@ void gpuCmdBindPipeline(GpuCommandBuffer cmd, GpuPipelineHandle pipeline) {
             }
         }
     } else if (type == GPU_PIPELINE_TYPE_GRAPHICS) {
-        if (cmd->rhiEncoder && !cmd->inRenderPass) {
-            ensureRenderPass(cmd);
-        } else if (cmd->inRenderPass && cmd->renderPassEncoder) {
+        if (cmd->inRenderPass && cmd->renderPassEncoder) {
             rhi::IRenderPipeline* pipe = gpuResolveRenderPipeline(cmd->device, pipeline);
             if (pipe) {
                 cmd->rootShaderObject = cmd->renderPassEncoder->bindPipeline(pipe);

@@ -30,6 +30,8 @@ typedef enum {
 void gpuCmdSetBufferState(GpuDevice device, GpuCommandEncoder encoder, GpuBufferHandle buffer, GpuResourceState state);
 void gpuCmdSetTextureState(GpuDevice device, GpuCommandEncoder encoder, GpuTextureHandle texture, GpuResourceState state);
 void gpuCmdGlobalBarrier(GpuCommandEncoder encoder);
+GpuResourceState gpuGetBufferState(GpuDevice device, GpuBufferHandle buffer);
+GpuResourceState gpuGetTextureState(GpuDevice device, GpuTextureHandle texture);
 
 #ifdef __cplusplus
 }
