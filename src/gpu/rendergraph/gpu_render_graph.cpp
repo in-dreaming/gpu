@@ -28,7 +28,8 @@ struct GpuGraphResourceRecord {
 
     GpuTextureHandle realizedTexture;
     GpuBufferHandle realizedBuffer;
-    GpuTextureHandle realizedView;
+    GpuTextureHandle realizedView;    // color render target view
+    GpuTextureHandle depthView;       // depth-stencil view
 
     GpuResourceState currentState;
     uint32_t firstPassIndex;
@@ -92,9 +93,12 @@ void gpuGraphDestroy(GpuGraph graph)
             if (res.kind == GPU_GRAPH_RESOURCE_TEXTURE) {
                 if (!res.imported) {
                     if (res.realizedView.index != 0) gpuDestroyTextureView(graph->device, res.realizedView);
+                    if (res.depthView.index != 0) gpuDestroyTextureView(graph->device, res.depthView);
                     if (res.realizedTexture.index != 0) gpuDestroyTexture(graph->device, res.realizedTexture);
-                } else if (!res.isSurfaceTexture && res.realizedView.index != 0) {
-                    gpuDestroyTextureView(graph->device, res.realizedView);
+                } else {
+                    if (res.depthView.index != 0) gpuDestroyTextureView(graph->device, res.depthView);
+                    if (!res.isSurfaceTexture && res.realizedView.index != 0)
+                        gpuDestroyTextureView(graph->device, res.realizedView);
                 }
             } else {
                 if (!res.imported && res.realizedBuffer.index != 0) gpuDestroyBuffer(graph->device, res.realizedBuffer);
@@ -112,9 +116,12 @@ void gpuGraphReset(GpuGraph graph)
             if (res.kind == GPU_GRAPH_RESOURCE_TEXTURE) {
                 if (!res.imported) {
                     if (res.realizedView.index != 0) gpuDestroyTextureView(graph->device, res.realizedView);
+                    if (res.depthView.index != 0) gpuDestroyTextureView(graph->device, res.depthView);
                     if (res.realizedTexture.index != 0) gpuDestroyTexture(graph->device, res.realizedTexture);
-                } else if (!res.isSurfaceTexture && res.realizedView.index != 0) {
-                    gpuDestroyTextureView(graph->device, res.realizedView);
+                } else {
+                    if (res.depthView.index != 0) gpuDestroyTextureView(graph->device, res.depthView);
+                    if (!res.isSurfaceTexture && res.realizedView.index != 0)
+                        gpuDestroyTextureView(graph->device, res.realizedView);
                 }
             } else {
                 if (!res.imported && res.realizedBuffer.index != 0) gpuDestroyBuffer(graph->device, res.realizedBuffer);
@@ -395,6 +402,15 @@ GpuResult gpuGraphCompile(GpuGraph graph)
         if (p->callback) p->culled = false;
     }
 
+    // Mark which resources are used as depth attachments
+    bool* isDepthResource = (bool*)alloca(resCount * sizeof(bool));
+    memset(isDepthResource, 0, resCount * sizeof(bool));
+    for (auto& p : graph->passes) {
+        if (p->hasDepth && p->depthAttachment.resource > 0 && p->depthAttachment.resource - 1 < resCount) {
+            isDepthResource[p->depthAttachment.resource - 1] = true;
+        }
+    }
+
     for (auto& res : graph->resources) {
         if (!res.imported && res.kind == GPU_GRAPH_RESOURCE_TEXTURE) {
             GpuResult r = gpuCreateTexture(graph->device, &res.textureDesc, &res.realizedTexture);
@@ -562,9 +578,31 @@ GpuResult gpuGraphExecute(GpuGraph graph, GpuCommandQueue queue)
                 memcpy(dst.clearValue, src.clearColor, sizeof(float) * 4);
             }
 
+            GpuRenderPassDepthAttachment depthAtt;
+            if (pass.hasDepth) {
+                uint32_t ri = pass.depthAttachment.resource - 1;
+                if (ri < graph->resources.size()) {
+                    auto& res = graph->resources[ri];
+                    memset(&depthAtt, 0, sizeof(depthAtt));
+                    // Create depth-stencil view if needed
+                    if (res.depthView.index == 0) {
+                        GpuTextureHandle texH = res.imported ? res.importedTexture : res.realizedTexture;
+                        gpuCreateTextureView(graph->device, texH, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &res.depthView);
+                    }
+                    depthAtt.viewHandle = res.depthView;
+                    depthAtt.depthLoadOp = pass.depthAttachment.loadOp;
+                    depthAtt.depthStoreOp = pass.depthAttachment.storeOp;
+                    depthAtt.clearDepth = pass.depthAttachment.clearDepth;
+                    depthAtt.stencilLoadOp = GPU_LOAD_OP_DONT_CARE;
+                    depthAtt.stencilStoreOp = GPU_STORE_OP_DONT_CARE;
+                    depthAtt.clearStencil = pass.depthAttachment.clearStencil;
+                }
+            }
+
             GpuRenderPassDesc passDesc = {};
             passDesc.colorAttachmentCount = (uint32_t)pass.colorAttachments.size();
             passDesc.colorAttachments = colorAtts;
+            passDesc.depthAttachment = pass.hasDepth ? &depthAtt : nullptr;
 
             GpuRenderPassEncoder rpEnc = gpuCmdBeginRenderPass(encoder, &passDesc);
             if (rpEnc) {

@@ -261,8 +261,10 @@ GpuResult gpuQueueWaitOnHost(GpuCommandQueue queue)
 
 GpuRenderPassEncoder gpuCmdBeginRenderPass(GpuCommandEncoder encoder, const GpuRenderPassDesc* desc)
 {
-    if (!encoder || !desc || desc->colorAttachmentCount == 0) return nullptr;
-    if (desc->colorAttachmentCount > 8) return nullptr;  // Limit to 8 attachments
+    if (!encoder || !desc) return nullptr;
+    // Need at least one color attachment or a depth attachment
+    if (desc->colorAttachmentCount == 0 && !desc->depthAttachment) return nullptr;
+    if (desc->colorAttachmentCount > 8) return nullptr;
 
     rhi::RenderPassColorAttachment colorAttachments[8];
     for (uint32_t i = 0; i < desc->colorAttachmentCount; i++) {
@@ -270,17 +272,14 @@ GpuRenderPassEncoder gpuCmdBeginRenderPass(GpuCommandEncoder encoder, const GpuR
         auto& dst = colorAttachments[i];
 
         if (src.attachment) {
-            // Surface texture path
             GpuSurfaceTexture_t* surfTex = static_cast<GpuSurfaceTexture_t*>(src.attachment);
             dst.view = surfTex->rhiTexture->getDefaultView();
         } else if (src.viewHandle.index != 0) {
-            // Texture view path (preferred for render-to-texture)
             rhi::ITextureView* view = encoder->device->textureViewPool.resolve(src.viewHandle.index, src.viewHandle.generation);
             if (view) {
                 dst.view = view;
             }
         } else if (src.textureHandle.index != 0) {
-            // Legacy: Regular texture path using default view
             rhi::ITexture* tex = encoder->device->texturePool.resolve(src.textureHandle.index, src.textureHandle.generation);
             if (tex) {
                 dst.view = tex->getDefaultView();
@@ -294,9 +293,31 @@ GpuRenderPassEncoder gpuCmdBeginRenderPass(GpuCommandEncoder encoder, const GpuR
         dst.clearValue[3] = src.clearValue[3];
     }
 
+    rhi::RenderPassDepthStencilAttachment depthAtt;
+    if (desc->depthAttachment) {
+        auto& src = *desc->depthAttachment;
+        depthAtt = {};
+        if (src.viewHandle.index != 0) {
+            rhi::ITextureView* view = encoder->device->textureViewPool.resolve(src.viewHandle.index, src.viewHandle.generation);
+            if (view) depthAtt.view = view;
+        } else if (src.textureHandle.index != 0) {
+            rhi::ITexture* tex = encoder->device->texturePool.resolve(src.textureHandle.index, src.textureHandle.generation);
+            if (tex) depthAtt.view = tex->getDefaultView();
+        }
+        depthAtt.depthLoadOp = (rhi::LoadOp)src.depthLoadOp;
+        depthAtt.depthStoreOp = (rhi::StoreOp)src.depthStoreOp;
+        depthAtt.depthClearValue = src.clearDepth;
+        depthAtt.stencilLoadOp = (rhi::LoadOp)src.stencilLoadOp;
+        depthAtt.stencilStoreOp = (rhi::StoreOp)src.stencilStoreOp;
+        depthAtt.stencilClearValue = src.clearStencil;
+    }
+
     rhi::RenderPassDesc rhiDesc = {};
     rhiDesc.colorAttachments = colorAttachments;
     rhiDesc.colorAttachmentCount = desc->colorAttachmentCount;
+    if (desc->depthAttachment) {
+        rhiDesc.depthStencilAttachment = &depthAtt;
+    }
 
     auto* passEncoder = encoder->rhiEncoder->beginRenderPass(rhiDesc);
     if (!passEncoder) return nullptr;

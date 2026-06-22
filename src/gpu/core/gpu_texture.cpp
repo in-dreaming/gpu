@@ -116,7 +116,6 @@ GpuResult gpuDestroyTexture(GpuDevice device, GpuTextureHandle handle)
 
 GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTextureViewType type, GpuTextureHandle* outViewHandle)
 {
-    (void)type;  // Type parameter reserved for future use
     if (!device || !gpuHandleIsValid(texture) || !outViewHandle) return GPU_ERROR_INVALID_ARGS;
 
     rhi::ITexture* tex = device->texturePool.resolve(texture.index, texture.generation);
@@ -128,6 +127,19 @@ GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTe
     viewDesc.subresourceRange.mipCount = 1;
     viewDesc.subresourceRange.layer = 0;
     viewDesc.subresourceRange.layerCount = 1;
+
+    // Set aspect based on view type
+    if (type == GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL) {
+        viewDesc.aspect = rhi::TextureAspect::DepthOnly;
+    } else if (type == GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE || type == GPU_TEXTURE_VIEW_TYPE_UNORDERED_ACCESS) {
+        // For depth textures used as SRV, still need DepthOnly aspect
+        auto fmt = tex->getDesc().format;
+        if (fmt == rhi::Format::D32Float || fmt == rhi::Format::D16Unorm || fmt == rhi::Format::D32FloatS8Uint) {
+            viewDesc.aspect = rhi::TextureAspect::DepthOnly;
+        }
+    } else {
+        viewDesc.aspect = rhi::TextureAspect::All;
+    }
 
     rhi::ComPtr<rhi::ITextureView> rhiView;
     rhi::Result rhiRes = device->rhiDevice->createTextureView(tex, viewDesc, rhiView.writeRef());

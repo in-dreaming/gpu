@@ -52,8 +52,20 @@ typedef struct {
 } GpuRenderPassColorAttachment;
 
 typedef struct {
+    GpuTextureHandle textureHandle;   // depth-stencil texture
+    GpuTextureHandle viewHandle;      // depth-stencil texture view (preferred)
+    GpuLoadOp depthLoadOp;
+    GpuStoreOp depthStoreOp;
+    float clearDepth;
+    GpuLoadOp stencilLoadOp;
+    GpuStoreOp stencilStoreOp;
+    uint8_t clearStencil;
+} GpuRenderPassDepthAttachment;
+
+typedef struct {
     uint32_t colorAttachmentCount;
     GpuRenderPassColorAttachment* colorAttachments;
+    const GpuRenderPassDepthAttachment* depthAttachment;  // optional, NULL = no depth
 } GpuRenderPassDesc;
 
 GpuRenderPassEncoder gpuCmdBeginRenderPass(GpuCommandEncoder encoder, const GpuRenderPassDesc* desc);

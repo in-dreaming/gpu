@@ -126,3 +126,27 @@ if(GPU_INSTALL)
     install(TARGETS 21_sponza_data_driven RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     copy_gpu_example_runtime_assets(21_sponza_data_driven)
 endif()
+
+# Demo 24: Sponza with Render Graph + Shadow + Multi-Light
+add_gpu_example(24_sponza_graph SHADERS shadow.slang forward.slang)
+target_include_directories(24_sponza_graph PRIVATE
+    "${CMAKE_SOURCE_DIR}/modules/3rd/slang-rhi/external/stb"
+)
+
+if(GPU_SPONZA_ROOT)
+    if(EXISTS "${GPU_SPONZA_ROOT}/sponza.obj" AND EXISTS "${GPU_SPONZA_ROOT}/sponza.mtl")
+        add_custom_command(TARGET 24_sponza_graph POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${GPU_SPONZA_ROOT}"
+                "$<TARGET_FILE_DIR:24_sponza_graph>/Sponza"
+        )
+        if(GPU_INSTALL)
+            install(DIRECTORY "${GPU_SPONZA_ROOT}/" DESTINATION ${CMAKE_INSTALL_BINDIR}/Sponza)
+        endif()
+    endif()
+endif()
+
+if(GPU_INSTALL)
+    install(TARGETS 24_sponza_graph RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    copy_gpu_example_runtime_assets(24_sponza_graph)
+endif()
