@@ -19,7 +19,7 @@
 
 // Capabilities & Debug
 #include "gpu/capability/gpu_capabilities.h"
-#include "gpu/capability/gpu_feature_info.h"
+#include "gpu/capability/gpu_feature_gating.h"
 #include "gpu/debug/gpu_debug.h"
 #include "gpu/debug/gpu_debug_markers.h"
 

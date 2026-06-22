@@ -1,4 +1,4 @@
-#ifdef _MSC_VER
+﻿#ifdef _MSC_VER
 #pragma warning(disable : 4996)
 #endif
 #include "gpu/pipeline/gpu_pipeline_cache.h"
@@ -484,4 +484,86 @@ void gpuPipelineCacheGetStats(GpuPipelineCache cache,
     if (outHitCount) *outHitCount = cache->hitCount;
     if (outMissCount) *outMissCount = cache->missCount;
     if (outEntryCount) *outEntryCount = cache->entryCount;
+}
+
+// ============================================================================
+// Phase E fix: Pipeline cache integration
+// ============================================================================
+
+GpuResult gpuSetDevicePipelineCache(GpuDevice device, GpuPipelineCache cache) {
+    if (!device) return GPU_ERROR_INVALID_PARAMETER;
+    device->pipelineCache = cache;
+    return GPU_OK;
+}
+
+GpuPipelineCache gpuGetDevicePipelineCache(GpuDevice device) {
+    if (!device) return nullptr;
+    return device->pipelineCache;
+}
+
+GpuResult gpuCreateGraphicsPipelineCached(GpuDevice device,
+                                           const GpuGraphicsPipelineDesc* desc,
+                                           GpuPipelineHandle* outPipeline,
+                                           uint64_t layoutHash) {
+    if (!device || !desc || !outPipeline) return GPU_ERROR_INVALID_PARAMETER;
+
+    // If device has a pipeline cache, try cache lookup
+    if (device->pipelineCache) {
+        GpuPipelineDesc pdesc = {};
+        pdesc.type = GPU_PIPELINE_TYPE_GRAPHICS;
+        pdesc.graphics = *desc;
+
+        uint8_t hash[GPU_SHA256_HASH_SIZE];
+        GpuResult hashRes = (layoutHash != 0)
+            ? gpuHashPipelineDescWithLayout(&pdesc, layoutHash, hash)
+            : gpuHashPipelineDesc(&pdesc, hash);
+        if (hashRes == GPU_OK) {
+            GpuPipelineHandle cached;
+            if (gpuPipelineCacheLookup(device->pipelineCache, hash, &cached) == GPU_OK) {
+                *outPipeline = cached;
+                return GPU_OK;
+            }
+            // Cache miss — create pipeline and store
+            GpuResult res = gpuCreateGraphicsPipeline(device, desc, outPipeline);
+            if (res == GPU_OK) {
+                gpuPipelineCacheStore(device->pipelineCache, hash, *outPipeline);
+            }
+            return res;
+        }
+    }
+
+    // No cache — create directly
+    return gpuCreateGraphicsPipeline(device, desc, outPipeline);
+}
+
+GpuResult gpuCreateComputePipelineCached(GpuDevice device,
+                                          const GpuComputePipelineDesc2* desc,
+                                          GpuPipelineHandle* outPipeline,
+                                          uint64_t layoutHash) {
+    if (!device || !desc || !outPipeline) return GPU_ERROR_INVALID_PARAMETER;
+
+    if (device->pipelineCache) {
+        GpuPipelineDesc pdesc = {};
+        pdesc.type = GPU_PIPELINE_TYPE_COMPUTE;
+        pdesc.compute = *desc;
+
+        uint8_t hash[GPU_SHA256_HASH_SIZE];
+        GpuResult hashRes = (layoutHash != 0)
+            ? gpuHashPipelineDescWithLayout(&pdesc, layoutHash, hash)
+            : gpuHashPipelineDesc(&pdesc, hash);
+        if (hashRes == GPU_OK) {
+            GpuPipelineHandle cached;
+            if (gpuPipelineCacheLookup(device->pipelineCache, hash, &cached) == GPU_OK) {
+                *outPipeline = cached;
+                return GPU_OK;
+            }
+            GpuResult res = gpuCreateComputePipeline2(device, desc, outPipeline);
+            if (res == GPU_OK) {
+                gpuPipelineCacheStore(device->pipelineCache, hash, *outPipeline);
+            }
+            return res;
+        }
+    }
+
+    return gpuCreateComputePipeline2(device, desc, outPipeline);
 }

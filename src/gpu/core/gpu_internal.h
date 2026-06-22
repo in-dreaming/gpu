@@ -2,15 +2,21 @@
 
 #include <slang-rhi.h>
 #include <vector>
+#include <string>
+#include <map>
+#include <mutex>
 #include "gpu/core/gpu_format.h"
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_handle_pool.h"
+#include "gpu/debug/gpu_debug.h"
 #include "gpu/resource/gpu_barrier.h"
 
 typedef struct GpuFrameContext_t* GpuFrameContext;
 
-// Forward declaration
+// Forward declarations
+typedef struct GpuBindlessHeap_t* GpuBindlessHeap;
+typedef struct GpuPipelineCache_t* GpuPipelineCache;
 struct GpuTensorData;
 
 struct GpuSubresourceStateRecord_t;
@@ -34,6 +40,27 @@ struct GpuDevice_t {
     GpuResourceState bufferStates[GpuHandlePool<rhi::IBuffer>::capacity()] = {};
     GpuResourceState textureStates[GpuHandlePool<rhi::ITexture>::capacity()] = {};
     GpuSubresourceTracker subresourceTrackers[GpuHandlePool<rhi::ITexture>::capacity()] = {};
+
+    // Per-device debug/validation state (Phase E fix: was global static)
+    GpuValidationCallback validationCallback = nullptr;
+    void* validationUserData = nullptr;
+    void (*debugCallback)(GpuDebugLevel, const char*, void*) = nullptr;
+    void* debugUserData = nullptr;
+    GpuDebugLevel debugLevel = GPU_DEBUG_LEVEL_NONE;
+    std::string lastError;
+    std::mutex debugMutex;
+
+    // Per-device bindless resource tracking (Phase E fix: gpuGetBindlessIndex)
+    struct BindlessEntry { GpuBindlessHeap heap; uint32_t index; };
+    std::map<uint64_t, BindlessEntry> bindlessResourceMap;
+    std::mutex bindlessMutex;
+
+    // Per-device debug name storage (Phase E)
+    std::map<uint64_t, std::string> debugNames;
+    std::mutex debugNameMutex;
+
+    // Per-device pipeline cache (Phase D fix)
+    GpuPipelineCache pipelineCache = nullptr;
 };
 
 struct GpuCommandEncoder_t {

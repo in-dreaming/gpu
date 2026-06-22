@@ -1,21 +1,22 @@
+﻿#ifdef _MSC_VER
+#pragma warning(disable : 4819)
+#endif
 #include "gpu/debug/gpu_debug_markers.h"
 #include "gpu/core/gpu_internal.h"
 #include <string>
-#include <map>
-#include <mutex>
 
 // ============================================================================
-// Internal storage for debug names set after creation
+// Internal helpers
 // ============================================================================
 
-static std::mutex g_debugNameMutex;
-static std::map<uint64_t, std::string> g_bufferDebugNames;
-static std::map<uint64_t, std::string> g_textureDebugNames;
-static std::map<uint64_t, std::string> g_samplerDebugNames;
-
-static inline uint64_t makeKey(uint32_t index, uint32_t generation) {
-    return ((uint64_t)index << 32) | generation;
+static inline uint64_t makeKey(uint32_t index, uint32_t generation, uint32_t typeTag) {
+    return ((uint64_t)typeTag << 48) | ((uint64_t)index << 16) | (uint64_t)generation;
 }
+
+// Type tags for debug name keys (avoids collisions between buffer/texture/sampler with same index)
+static const uint32_t NAME_TAG_BUFFER  = 1;
+static const uint32_t NAME_TAG_TEXTURE = 2;
+static const uint32_t NAME_TAG_SAMPLER = 3;
 
 // ============================================================================
 // Debug Markers
@@ -85,17 +86,18 @@ void gpuCmdInsertComputeDebugMarker(GpuComputePassEncoder pass, const char* name
 }
 
 // ============================================================================
-// Debug Names
+// Debug Names — per-device storage (Phase E fix: was global static)
 // ============================================================================
 
 GpuResult gpuSetBufferDebugName(GpuDevice device, GpuBufferHandle buffer, const char* name)
 {
     if (!device || buffer.index == 0) return GPU_ERROR_INVALID_ARGS;
-    std::lock_guard<std::mutex> lock(g_debugNameMutex);
+    std::lock_guard<std::mutex> lock(device->debugNameMutex);
+    auto key = makeKey(buffer.index, buffer.generation, NAME_TAG_BUFFER);
     if (name) {
-        g_bufferDebugNames[makeKey(buffer.index, buffer.generation)] = name;
+        device->debugNames[key] = name;
     } else {
-        g_bufferDebugNames.erase(makeKey(buffer.index, buffer.generation));
+        device->debugNames.erase(key);
     }
     return GPU_SUCCESS;
 }
@@ -103,11 +105,12 @@ GpuResult gpuSetBufferDebugName(GpuDevice device, GpuBufferHandle buffer, const 
 GpuResult gpuSetTextureDebugName(GpuDevice device, GpuTextureHandle texture, const char* name)
 {
     if (!device || texture.index == 0) return GPU_ERROR_INVALID_ARGS;
-    std::lock_guard<std::mutex> lock(g_debugNameMutex);
+    std::lock_guard<std::mutex> lock(device->debugNameMutex);
+    auto key = makeKey(texture.index, texture.generation, NAME_TAG_TEXTURE);
     if (name) {
-        g_textureDebugNames[makeKey(texture.index, texture.generation)] = name;
+        device->debugNames[key] = name;
     } else {
-        g_textureDebugNames.erase(makeKey(texture.index, texture.generation));
+        device->debugNames.erase(key);
     }
     return GPU_SUCCESS;
 }
@@ -115,11 +118,12 @@ GpuResult gpuSetTextureDebugName(GpuDevice device, GpuTextureHandle texture, con
 GpuResult gpuSetSamplerDebugName(GpuDevice device, GpuSamplerHandle sampler, const char* name)
 {
     if (!device || sampler.index == 0) return GPU_ERROR_INVALID_ARGS;
-    std::lock_guard<std::mutex> lock(g_debugNameMutex);
+    std::lock_guard<std::mutex> lock(device->debugNameMutex);
+    auto key = makeKey(sampler.index, sampler.generation, NAME_TAG_SAMPLER);
     if (name) {
-        g_samplerDebugNames[makeKey(sampler.index, sampler.generation)] = name;
+        device->debugNames[key] = name;
     } else {
-        g_samplerDebugNames.erase(makeKey(sampler.index, sampler.generation));
+        device->debugNames.erase(key);
     }
     return GPU_SUCCESS;
 }
@@ -127,11 +131,10 @@ GpuResult gpuSetSamplerDebugName(GpuDevice device, GpuSamplerHandle sampler, con
 const char* gpuGetBufferDebugName(GpuDevice device, GpuBufferHandle buffer)
 {
     if (!device || buffer.index == 0) return nullptr;
-    std::lock_guard<std::mutex> lock(g_debugNameMutex);
-    auto it = g_bufferDebugNames.find(makeKey(buffer.index, buffer.generation));
-    if (it != g_bufferDebugNames.end()) return it->second.c_str();
+    std::lock_guard<std::mutex> lock(device->debugNameMutex);
+    auto it = device->debugNames.find(makeKey(buffer.index, buffer.generation, NAME_TAG_BUFFER));
+    if (it != device->debugNames.end()) return it->second.c_str();
 
-    // Fall back to creation label from RHI desc
     rhi::IBuffer* rhiBuf = device->bufferPool.resolve(buffer.index, buffer.generation);
     if (rhiBuf) return rhiBuf->getDesc().label;
     return nullptr;
@@ -140,9 +143,9 @@ const char* gpuGetBufferDebugName(GpuDevice device, GpuBufferHandle buffer)
 const char* gpuGetTextureDebugName(GpuDevice device, GpuTextureHandle texture)
 {
     if (!device || texture.index == 0) return nullptr;
-    std::lock_guard<std::mutex> lock(g_debugNameMutex);
-    auto it = g_textureDebugNames.find(makeKey(texture.index, texture.generation));
-    if (it != g_textureDebugNames.end()) return it->second.c_str();
+    std::lock_guard<std::mutex> lock(device->debugNameMutex);
+    auto it = device->debugNames.find(makeKey(texture.index, texture.generation, NAME_TAG_TEXTURE));
+    if (it != device->debugNames.end()) return it->second.c_str();
 
     rhi::ITexture* rhiTex = device->texturePool.resolve(texture.index, texture.generation);
     if (rhiTex) return rhiTex->getDesc().label;
@@ -152,9 +155,9 @@ const char* gpuGetTextureDebugName(GpuDevice device, GpuTextureHandle texture)
 const char* gpuGetSamplerDebugName(GpuDevice device, GpuSamplerHandle sampler)
 {
     if (!device || sampler.index == 0) return nullptr;
-    std::lock_guard<std::mutex> lock(g_debugNameMutex);
-    auto it = g_samplerDebugNames.find(makeKey(sampler.index, sampler.generation));
-    if (it != g_samplerDebugNames.end()) return it->second.c_str();
+    std::lock_guard<std::mutex> lock(device->debugNameMutex);
+    auto it = device->debugNames.find(makeKey(sampler.index, sampler.generation, NAME_TAG_SAMPLER));
+    if (it != device->debugNames.end()) return it->second.c_str();
 
     rhi::ISampler* rhiSampler = device->samplerPool.resolve(sampler.index, sampler.generation);
     if (rhiSampler) return rhiSampler->getDesc().label;

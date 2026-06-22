@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-void gpuEmitValidation(GpuValidationSeverity severity, const char* messageId,
+void gpuEmitValidation(GpuDevice device, GpuValidationSeverity severity, const char* messageId,
                         const char* message, const char* objectLabel,
                         const char* function, const char* file, int line);
 
@@ -16,7 +16,7 @@ void gpuEmitValidation(GpuValidationSeverity severity, const char* messageId,
 #endif
 
 #define GPU_VALIDATE(device, severity, msgId, msg, label) \
-    gpuEmitValidation(severity, msgId, msg, label, __FUNCTION__, __FILE__, __LINE__)
+    gpuEmitValidation(device, severity, msgId, msg, label, __FUNCTION__, __FILE__, __LINE__)
 
 #define GPU_VALIDATE_NULL(device, ptr, label, msgId) do { \
     if (!(ptr)) { \

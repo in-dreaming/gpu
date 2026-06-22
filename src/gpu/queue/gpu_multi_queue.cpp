@@ -296,10 +296,17 @@ GpuResult gpuGetQueueTimestampFrequency(GpuCommandQueue queue, uint64_t* outFreq
     if (!queue || !outFrequency) {
         return GPU_ERROR_INVALID_PARAMETER;
     }
-    
-    // Return a default frequency (1 GHz for nanosecond timestamps)
+
+    rhi::ICommandQueue* rhiQueue = reinterpret_cast<rhi::ICommandQueue*>(queue);
+
+    // Try to get timestamp calibration from the queue (real GPU frequency)
+    rhi::TimestampCalibration calib = {};
+    if (SLANG_SUCCEEDED(rhiQueue->getTimestampCalibration(&calib)) && calib.gpuFrequency > 0) {
+        *outFrequency = calib.gpuFrequency;
+        return GPU_OK;
+    }
+
+    // Fallback: assume nanosecond timestamps (1 GHz)
     *outFrequency = 1000000000ULL;
-    
-    (void)queue;
     return GPU_OK;
 }

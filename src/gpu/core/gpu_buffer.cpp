@@ -1,8 +1,9 @@
-#include "gpu/core/gpu_buffer.h"
+﻿#include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_device.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/debug/gpu_validation.h"
 #include "gpu/resource/gpu_frame_context.h"
+#include "gpu/bindless/gpu_bindless_heap.h"
 
 static GpuResourceState gpuDefaultBufferState(GpuBufferUsage usage)
 {
@@ -99,14 +100,33 @@ GpuResult gpuDestroyBuffer(GpuDevice device, GpuBufferHandle handle)
     rhi::IBuffer* buf = device->bufferPool.resolve(handle.index, handle.generation);
     if (!buf) return GPU_ERROR_INVALID_ARGS;
 
+    // Invalidate any bindless slots referencing this resource
+    {
+        GpuBindlessHeap heapToFree = nullptr;
+        uint32_t idxToFree = UINT32_MAX;
+        {
+            auto key = ((uint64_t)handle.index << 32) | handle.generation;
+            std::lock_guard<std::mutex> lock(device->bindlessMutex);
+            auto it = device->bindlessResourceMap.find(key);
+            if (it != device->bindlessResourceMap.end()) {
+                heapToFree = it->second.heap;
+                idxToFree = it->second.index;
+                device->bindlessResourceMap.erase(it);
+            }
+        }
+        // Free bindless slot outside the map mutex (gpuBindlessFree will try
+        // to erase from the map, but we already erased — no-op, no deadlock)
+        if (heapToFree) {
+            gpuBindlessFree(heapToFree, idxToFree);
+        }
+    }
+
     if (device->frameContext) {
         gpuFrameDeferDestroyBuffer(device->frameContext, handle);
         return GPU_SUCCESS;
     }
 
-    if (device->graphicsQueue) {
-        device->graphicsQueue->waitOnHost();
-    }
+    // Non-frame path: release directly without waitOnHost.
     buf->release();
     device->bufferStates[handle.index] = GPU_RESOURCE_STATE_UNDEFINED;
     device->bufferPool.release(handle.index, handle.generation);

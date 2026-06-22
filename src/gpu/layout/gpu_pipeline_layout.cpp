@@ -142,6 +142,13 @@ struct BindingRangeAccumulator {
                     SlangInt spaceOffset = typeLayout->getDescriptorSetSpaceOffset(descSetIndex);
                     range.space = (spaceOffset >= 0) ? (uint32_t)spaceOffset : 0;
                 }
+
+                // Extract uniform size for constant buffers and push constants
+                if (kind == GPU_BINDING_KIND_CONSTANT_BUFFER ||
+                    kind == GPU_BINDING_KIND_PUSH_CONSTANT ||
+                    kind == GPU_BINDING_KIND_INLINE_UNIFORM_DATA) {
+                    range.uniformSize = (uint32_t)leafLayout->getSize();
+                }
             }
 
             // For binding index, we need to look at the variable layout
@@ -315,7 +322,7 @@ GpuResult gpuReflectPipelineLayout(GpuShaderProgram program, GpuPipelineLayout* 
             pcr.set = r.set;
             pcr.binding = r.binding;
             pcr.offset = 0;
-            pcr.size = 0;  // TODO: extract actual size from reflection
+            pcr.size = r.uniformSize;
             pcr.stageFlags = r.stageFlags;
             pcr.name = r.name;
             layout->pushConstantRanges.push_back(pcr);

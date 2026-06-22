@@ -41,7 +41,6 @@ set(GPU_PUBLIC_HEADERS
     bindless/gpu_descriptor_set.h
     # Phase 3 - Capability
     capability/gpu_feature_gating.h
-    capability/gpu_feature_info.h
     capability/gpu_fallback_registry.h
     # Phase B - Lifecycle
     resource/gpu_frame_context.h

@@ -70,6 +70,28 @@ void gpuPipelineCacheGetStats(GpuPipelineCache cache,
                                uint32_t* outMissCount, 
                                uint32_t* outEntryCount);
 
+// ============================================================================
+// Phase E fix: Pipeline cache integration with pipeline creation
+// ============================================================================
+
+// Set a default pipeline cache on the device. When set, gpuCreateGraphicsPipeline
+// and gpuCreateComputePipeline2 will automatically consult this cache.
+GpuResult gpuSetDevicePipelineCache(GpuDevice device, GpuPipelineCache cache);
+GpuPipelineCache gpuGetDevicePipelineCache(GpuDevice device);
+
+// Create graphics pipeline with automatic cache lookup/store
+// If a device pipeline cache is set, this will check the cache first
+GpuResult gpuCreateGraphicsPipelineCached(GpuDevice device, 
+                                           const GpuGraphicsPipelineDesc* desc, 
+                                           GpuPipelineHandle* outPipeline,
+                                           uint64_t layoutHash);
+
+// Create compute pipeline with automatic cache lookup/store
+GpuResult gpuCreateComputePipelineCached(GpuDevice device, 
+                                          const GpuComputePipelineDesc2* desc, 
+                                          GpuPipelineHandle* outPipeline,
+                                          uint64_t layoutHash);
+
 #ifdef __cplusplus
 }
 #endif

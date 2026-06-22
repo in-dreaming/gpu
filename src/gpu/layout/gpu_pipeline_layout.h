@@ -68,6 +68,7 @@ typedef struct {
     uint32_t binding;           // binding index within the set
     uint32_t count;             // number of descriptors (UINT32_MAX = unbounded)
     uint32_t space;             // register space (D3D) / descriptor set (Vulkan)
+    uint32_t uniformSize;       // size in bytes for constant buffers / push constants
     const char* name;           // variable name from reflection (owned by layout)
     GpuShaderStageFlags stageFlags;  // which stages use this binding
     bool writable;              // UAV vs SRV

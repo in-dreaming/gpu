@@ -101,14 +101,38 @@ uint32_t gpuBindlessAllocate(GpuBindlessHeap heap, GpuHandle resource)
     }
 
     heap->records[index] = record;
+
+    // Register in device's bindless resource map for gpuGetBindlessIndex lookups
+    {
+        auto key = ((uint64_t)resource.index << 32) | resource.generation;
+        std::lock_guard<std::mutex> lock(heap->device->bindlessMutex);
+        heap->device->bindlessResourceMap[key] = {heap, index};
+    }
+
     return index;
+}
+
+// Internal free without mutex (called from gpuBindlessFree and destroy paths)
+static void bindlessFreeInternal(GpuBindlessHeap heap, uint32_t index)
+{
+    if (!heap || index >= heap->records.size()) return;
+    heap->records[index] = GpuBindlessRecord{};
+    heap->allocator.free(index);
 }
 
 void gpuBindlessFree(GpuBindlessHeap heap, uint32_t index)
 {
     if (!heap || index >= heap->records.size()) return;
-    heap->records[index] = GpuBindlessRecord{};
-    heap->allocator.free(index);
+    // Unregister from device's bindless resource map
+    {
+        auto& rec = heap->records[index];
+        if (rec.occupied) {
+            auto key = ((uint64_t)rec.resource.index << 32) | rec.resource.generation;
+            std::lock_guard<std::mutex> lock(heap->device->bindlessMutex);
+            heap->device->bindlessResourceMap.erase(key);
+        }
+    }
+    bindlessFreeInternal(heap, index);
 }
 
 bool gpuBindlessIsAllocated(GpuBindlessHeap heap, uint32_t index)
@@ -138,9 +162,14 @@ GpuResult gpuBindlessGetDescriptorHandle(GpuBindlessHeap heap, uint32_t index, G
 
 uint32_t gpuGetBindlessIndex(GpuDevice device, GpuHandle handle)
 {
-    if (!device) return UINT32_MAX;
-    (void)device;
-    return handle.index;
+    if (!device || !gpuHandleIsValid(handle)) return UINT32_MAX;
+    std::lock_guard<std::mutex> lock(device->bindlessMutex);
+    auto key = ((uint64_t)handle.index << 32) | handle.generation;
+    auto it = device->bindlessResourceMap.find(key);
+    if (it != device->bindlessResourceMap.end()) {
+        return it->second.index;
+    }
+    return UINT32_MAX;
 }
 
 // ============================================================================

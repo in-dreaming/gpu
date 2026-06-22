@@ -297,9 +297,14 @@ int main(void)
         CHECK(gpuMapReadbackBuffer(device, readbackBuf, &data));
         CHECK_TRUE(data != NULL);
 
+        // Get the actual row pitch (may have alignment padding)
+        uint32_t rowPitch = gpuGetReadbackRowPitch(rt, device);
+        CHECK_TRUE(rowPitch > 0);
+        printf("  row pitch: %u bytes\n", rowPitch);
+
         const uint8_t* pixels = (const uint8_t*)data;
-        // Check center pixel
-        uint32_t centerIdx = (RT_SIZE / 2 * RT_SIZE + RT_SIZE / 2) * 4;
+        // Use row pitch for correct pixel offset
+        uint32_t centerIdx = (RT_SIZE / 2) * rowPitch + (RT_SIZE / 2) * 4;
         uint8_t r = pixels[centerIdx + 0];
         uint8_t g = pixels[centerIdx + 1];
         uint8_t b = pixels[centerIdx + 2];
@@ -313,20 +318,11 @@ int main(void)
         uint8_t a0 = pixels[3];
         printf("  first pixel: R=%u G=%u B=%u A=%u\n", r0, g0, b0, a0);
 
-        // Note: On some backends, copyTextureToBuffer may have layout/pitch issues
-        // that result in zero or unchanged data. The key conformance check is that
-        // the entire render+copy+map pipeline executes without errors.
-        // If the data changed from our init pattern, the copy worked.
-        if (r != 0xAA || g != 0xAA || b != 0xAA || a != 0xAA) {
-            printf("  copy texture to buffer worked - data changed\n");
-            // If clear color is visible, verify it
-            if (r > 240 && g > 110 && g < 150 && b < 20 && a > 240) {
-                printf("  clear color verified correctly\n");
-            }
-        } else {
-            printf("  NOTE: readback data unchanged (known layout issue on some backends)\n");
-            printf("  API pipeline executed successfully, data verification deferred\n");
-        }
+        // Clear color (1.0, 0.5, 0.0, 1.0) -> (255, 128, 0, 255) in RGBA8
+        CHECK_TRUE(r > 240);
+        CHECK_TRUE(g > 110 && g < 150);
+        CHECK_TRUE(b < 20);
+        CHECK_TRUE(a > 240);
 
         gpuUnmapReadbackBuffer(device, readbackBuf);
 
@@ -406,7 +402,8 @@ int main(void)
             CHECK(gpuMapReadbackBuffer(device, readbackBuf, &data));
 
             const uint8_t* pixels = (const uint8_t*)data;
-            uint32_t idx = (RT_SIZE / 2 * RT_SIZE + RT_SIZE / 2) * 4;
+            uint32_t rp = gpuGetReadbackRowPitch(rt, device);
+            uint32_t idx = (RT_SIZE / 2) * rp + (RT_SIZE / 2) * 4;
             uint8_t r = pixels[idx + 0];
             uint8_t g = pixels[idx + 1];
             uint8_t b = pixels[idx + 2];
@@ -414,9 +411,10 @@ int main(void)
 
             printf("  color %d: R=%u G=%u B=%u A=%u\n", t, r, g, b, a);
 
-            // Note: Readback may have layout issues on some backends.
-            // The conformance check is that the pipeline executes without errors.
-            (void)r; (void)g; (void)b; (void)a;
+            // Verify clear color is correct
+            if (t == 0) { CHECK_TRUE(b > 240 && r < 20 && g < 20); }
+            if (t == 1) { CHECK_TRUE(g > 240 && r < 20 && b < 20); }
+            if (t == 2) { CHECK_TRUE(r > 240 && g > 240 && b > 240); }
 
             gpuUnmapReadbackBuffer(device, readbackBuf);
         }
@@ -587,17 +585,18 @@ int main(void)
             CHECK(gpuQueueWaitOnHost(queue));
         }
 
-        // Verify last frame
+        // Verify last frame (frame 99: f%3==0, so red)
         void* data = NULL;
         CHECK(gpuMapReadbackBuffer(device, readbackBuf, &data));
         const uint8_t* pixels = (const uint8_t*)data;
-        uint32_t idx = (RT_SIZE / 2 * RT_SIZE + RT_SIZE / 2) * 4;
+        uint32_t rp = gpuGetReadbackRowPitch(rt, device);
+        uint32_t idx = (RT_SIZE / 2) * rp + (RT_SIZE / 2) * 4;
         uint8_t pr = pixels[idx + 0];
         uint8_t pg = pixels[idx + 1];
         uint8_t pb = pixels[idx + 2];
         printf("  last frame (frame %d): R=%u G=%u B=%u\n", frameCount - 1, pr, pg, pb);
-        // Note: Readback may have layout issues on some backends
-        (void)pr; (void)pg; (void)pb;
+        // Frame 99: f%3==0, so clear to red (1,0,0,1) -> (255,0,0,255)
+        CHECK_TRUE(pr > 240 && pg < 20 && pb < 20);
         gpuUnmapReadbackBuffer(device, readbackBuf);
 
         printf("  %d frames rendered OK\n", frameCount);

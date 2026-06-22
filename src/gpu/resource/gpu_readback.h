@@ -19,6 +19,10 @@ GpuResult gpuCmdCopyTextureToBuffer(GpuCommandEncoder encoder,
 GpuResult gpuMapReadbackBuffer(GpuDevice device, GpuBufferHandle handle, void** outPtr);
 void gpuUnmapReadbackBuffer(GpuDevice device, GpuBufferHandle handle);
 
+// Get the row pitch (in bytes) for readback data of a given texture
+// Use this to compute pixel offsets when reading mapped readback data
+uint32_t gpuGetReadbackRowPitch(GpuTextureHandle texture, GpuDevice device);
+
 #ifdef __cplusplus
 }
 #endif
