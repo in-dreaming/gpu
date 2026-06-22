@@ -78,11 +78,11 @@ void gpuCmdSetTextureSubresourceState(GpuDevice device, GpuCommandEncoder encode
 }
 
 GpuResourceState gpuGetTextureSubresourceState(GpuDevice device, GpuTextureHandle texture,
-                                               uint32_t mipLevel, uint32_t arrayLayer)
+                                                uint32_t mipLevel, uint32_t arrayLayer)
 {
     if (!device || texture.index == 0) return GPU_RESOURCE_STATE_UNDEFINED;
-    GpuSubresourceTracker* trk = device->subresourceTrackers[texture.index];
-    if (trk) return trk->get(mipLevel, arrayLayer);
+    GpuSubresourceTracker trk = device->subresourceTrackers[texture.index];
+    if (trk) return gpuSubresourceTrackerGet(trk, mipLevel, arrayLayer);
     return device->textureStates[texture.index];
 }
 

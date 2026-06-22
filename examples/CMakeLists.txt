@@ -89,6 +89,10 @@ add_gpu_example(06_triangle SHADERS triangle.slang)
 add_gpu_example(06b_triangle_readback SHADERS triangle.slang)
 add_gpu_example(07_compute_pipeline SHADERS prefix_sum.slang)
 
+# Phase C - Render Graph Examples
+add_gpu_example(22_triangle_graph SHADERS triangle.slang)
+add_gpu_example(23_readback_graph SHADERS triangle.slang)
+
 # Phase 3 Examples
 add_gpu_example(13_backend_switch)
 add_gpu_example(14_feature_gating)

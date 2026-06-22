@@ -2,6 +2,7 @@
 #include "gpu/core/gpu_device.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/debug/gpu_validation.h"
+#include "gpu/resource/gpu_frame_context.h"
 
 static GpuResourceState gpuDefaultTextureState(GpuTextureUsage usage)
 {
@@ -81,6 +82,11 @@ GpuResult gpuDestroyTexture(GpuDevice device, GpuTextureHandle handle)
     rhi::ITexture* tex = device->texturePool.resolve(handle.index, handle.generation);
     if (!tex) return GPU_ERROR_INVALID_ARGS;
 
+    if (device->frameContext) {
+        gpuFrameDeferDestroyTexture(device->frameContext, handle);
+        return GPU_SUCCESS;
+    }
+
     if (device->graphicsQueue) {
         device->graphicsQueue->waitOnHost();
     }
@@ -129,6 +135,11 @@ GpuResult gpuDestroyTextureView(GpuDevice device, GpuTextureHandle viewHandle)
 
     rhi::ITextureView* view = device->textureViewPool.resolve(viewHandle.index, viewHandle.generation);
     if (!view) return GPU_ERROR_INVALID_ARGS;
+
+    if (device->frameContext) {
+        gpuFrameDeferDestroyTextureView(device->frameContext, viewHandle);
+        return GPU_SUCCESS;
+    }
 
     if (device->graphicsQueue) {
         device->graphicsQueue->waitOnHost();

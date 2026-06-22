@@ -40,6 +40,8 @@ set(GPU_PUBLIC_HEADERS
     capability/gpu_fallback_registry.h
     # Phase B - Lifecycle
     resource/gpu_frame_context.h
+    # Phase C - Render Graph
+    rendergraph/gpu_render_graph.h
     # Phase 3 - AI
     ai/gpu_tensor.h
     ai/gpu_matrix_pipeline.h
@@ -70,6 +72,7 @@ set(GPU_SOURCES
     resource/gpu_streaming_manager.cpp
     resource/gpu_sparse_resource.cpp
     resource/gpu_frame_context.cpp
+    rendergraph/gpu_render_graph.cpp
     shader/gpu_shader_compiler.cpp
     shader/gpu_slang_module.cpp
     shader/gpu_shader_cache.cpp

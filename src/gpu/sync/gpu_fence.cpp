@@ -65,7 +65,8 @@ GpuResult gpuQueueSubmitWithFence(GpuCommandQueue queue, uint32_t cmdCount,
                                    GpuCommandBuffer* cmds, GpuFence signalFence,
                                    uint64_t signalValue)
 {
-    if (!queue || !cmds) return GPU_ERROR_INVALID_ARGS;
+    if (!queue) return GPU_ERROR_INVALID_ARGS;
+    if (cmdCount > 0 && !cmds) return GPU_ERROR_INVALID_ARGS;
 
     rhi::ICommandQueue* rhiQueue = reinterpret_cast<rhi::ICommandQueue*>(queue);
 

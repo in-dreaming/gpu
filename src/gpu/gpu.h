@@ -67,3 +67,9 @@
 
 // Ray Tracing (Phase 3)
 #include "gpu/raytracing/gpu_raytracing.h"
+
+// Lifecycle (Phase B)
+#include "gpu/resource/gpu_frame_context.h"
+
+// Render Graph (Phase C)
+#include "gpu/rendergraph/gpu_render_graph.h"

@@ -10,17 +10,10 @@
 #endif
 
 enum { kMaxInFlightDefault = 3 };
-static constexpr uint64_t kDefaultPageSize = 64 * 1024;
 
 struct DeferredBuf { GpuBufferHandle handle; uint64_t fence; };
 struct DeferredTex { GpuTextureHandle handle; uint64_t fence; };
 struct DeferredView { GpuTextureHandle handle; uint64_t fence; };
-
-struct UploadPage {
-    rhi::ComPtr<rhi::IBuffer> buffer;
-    uint64_t capacity;
-    uint64_t used;
-};
 
 struct Readback {
     rhi::ComPtr<rhi::IBuffer> staging;
@@ -40,7 +33,6 @@ struct GpuFrameContext_t {
     std::vector<DeferredBuf>  deferBuf;
     std::vector<DeferredTex>  deferTex;
     std::vector<DeferredView> deferView;
-    std::vector<UploadPage>   pages;
     std::vector<Readback>     readbacks;
     std::mutex mtx;
 };
@@ -85,6 +77,8 @@ GpuResult gpuFrameContextCreate(GpuDevice device, uint32_t maxInFlight, GpuFrame
     GpuResult r = gpuCreateFence(device, 0, &ctx->frameFence);
     if (r != GPU_SUCCESS) { delete ctx; return r; }
 
+    device->frameContext = ctx;
+
     *out = ctx;
     return GPU_SUCCESS;
 }
@@ -92,13 +86,16 @@ GpuResult gpuFrameContextCreate(GpuDevice device, uint32_t maxInFlight, GpuFrame
 void gpuFrameContextDestroy(GpuFrameContext ctx)
 {
     if (!ctx) return;
-    if (ctx->device && ctx->device->graphicsQueue)
-        ctx->device->graphicsQueue->waitOnHost();
+    if (ctx->device) {
+        if (ctx->device->frameContext == ctx)
+            ctx->device->frameContext = nullptr;
+        if (ctx->device->graphicsQueue)
+            ctx->device->graphicsQueue->waitOnHost();
+    }
 
     for (auto& d : ctx->deferBuf)  releaseBuf(ctx->device, d.handle);
     for (auto& d : ctx->deferTex)  releaseTex(ctx->device, d.handle);
     for (auto& d : ctx->deferView) releaseView(ctx->device, d.handle);
-    for (auto& p : ctx->pages)     { if (p.buffer) p.buffer->release(); }
     for (auto& r : ctx->readbacks) {
         if (r.staging && r.mapped)
             ctx->device->rhiDevice->unmapBuffer(r.staging);
@@ -147,8 +144,6 @@ GpuResult gpuFrameBegin(GpuFrameContext ctx)
     }
     ctx->deferView.resize(w);
 
-    for (auto& p : ctx->pages) p.used = 0;
-
     w = 0;
     for (size_t i = 0; i < ctx->readbacks.size(); i++) {
         auto& rr = ctx->readbacks[i];
@@ -172,7 +167,31 @@ GpuResult gpuFrameEnd(GpuFrameContext ctx, GpuCommandQueue queue)
 {
     if (!ctx || !queue) return GPU_ERROR_INVALID_ARGS;
     ctx->lastSubmit++;
-    return gpuQueueSubmitWithFence(queue, 0, nullptr, ctx->frameFence, ctx->lastSubmit);
+
+    rhi::ICommandQueue* rhiQueue = reinterpret_cast<rhi::ICommandQueue*>(queue);
+    rhi::ComPtr<rhi::ICommandEncoder> enc;
+    if (SLANG_FAILED(rhiQueue->createCommandEncoder(enc.writeRef())))
+        return GPU_ERROR_INTERNAL;
+
+    rhi::ComPtr<rhi::ICommandBuffer> cb;
+    enc->finish(cb.writeRef());
+
+    rhi::SubmitDesc submitDesc = {};
+    rhi::ICommandBuffer* cmdBuf = cb.get();
+    submitDesc.commandBuffers = &cmdBuf;
+    submitDesc.commandBufferCount = 1;
+
+    rhi::IFence* fencePtr = nullptr;
+    uint64_t fenceVal = ctx->lastSubmit;
+    if (ctx->frameFence) {
+        fencePtr = ctx->frameFence->rhiFence.get();
+        submitDesc.signalFences = &fencePtr;
+        submitDesc.signalFenceValues = &fenceVal;
+        submitDesc.signalFenceCount = 1;
+    }
+
+    rhiQueue->submit(submitDesc);
+    return GPU_SUCCESS;
 }
 
 uint64_t gpuFrameGetIndex(GpuFrameContext ctx)
@@ -212,7 +231,7 @@ void gpuFrameDeferDestroyTextureView(GpuFrameContext ctx, GpuTextureHandle h)
 }
 
 GpuResult gpuFrameUploadData(GpuFrameContext ctx, GpuBufferHandle dst,
-                             uint64_t offset, uint64_t size, const void* data)
+                              uint64_t offset, uint64_t size, const void* data)
 {
     if (!ctx || !data || size == 0) return GPU_ERROR_INVALID_ARGS;
 
@@ -227,73 +246,23 @@ GpuResult gpuFrameUploadData(GpuFrameContext ctx, GpuBufferHandle dst,
         return GPU_SUCCESS;
     }
 
-    std::lock_guard<std::mutex> lk(ctx->mtx);
-
-    UploadPage* page = nullptr;
-    for (auto& p : ctx->pages) {
-        if (p.capacity - p.used >= size) { page = &p; break; }
-    }
-
-    if (!page) {
-        uint64_t ps = (size > kDefaultPageSize) ? size : kDefaultPageSize;
-        UploadPage np;
-        np.capacity = ps;
-        np.used = 0;
-
-        rhi::BufferDesc sd = {};
-        sd.size = ps;
-        sd.usage = rhi::BufferUsage::CopySource;
-        sd.memoryType = rhi::MemoryType::Upload;
-        sd.label = "frame_upload";
-
-        if (SLANG_FAILED(ctx->device->rhiDevice->createBuffer(sd, nullptr, np.buffer.writeRef())) ||
-            !np.buffer) {
-            rhi::ComPtr<rhi::ICommandEncoder> enc;
-            if (SLANG_FAILED(ctx->device->graphicsQueue->createCommandEncoder(enc.writeRef())))
-                return GPU_ERROR_INTERNAL;
-            enc->uploadBufferData(rhiDst, offset, size, data);
-            rhi::ComPtr<rhi::ICommandBuffer> cb;
-            enc->finish(cb.writeRef());
-            rhi::SubmitDesc s = {};
-            rhi::ICommandBuffer* c = cb.get();
-            s.commandBuffers = &c;
-            s.commandBufferCount = 1;
-            ctx->device->graphicsQueue->submit(s);
-            return GPU_SUCCESS;
-        }
-        ctx->pages.push_back(std::move(np));
-        page = &ctx->pages.back();
-    }
-
-    void* sp = nullptr;
-    if (SLANG_FAILED(ctx->device->rhiDevice->mapBuffer(
-            page->buffer, rhi::CpuAccessMode::Write, &sp)))
-        return GPU_ERROR_INTERNAL;
-
-    memcpy(static_cast<uint8_t*>(sp) + page->used, data, size);
-    ctx->device->rhiDevice->unmapBuffer(page->buffer);
-
     rhi::ComPtr<rhi::ICommandEncoder> enc;
     if (SLANG_FAILED(ctx->device->graphicsQueue->createCommandEncoder(enc.writeRef())))
         return GPU_ERROR_INTERNAL;
-
-    enc->copyBuffer(rhiDst, offset, page->buffer, page->used, size);
-
+    enc->uploadBufferData(rhiDst, offset, size, data);
     rhi::ComPtr<rhi::ICommandBuffer> cb;
     enc->finish(cb.writeRef());
-
     rhi::SubmitDesc s = {};
     rhi::ICommandBuffer* c = cb.get();
     s.commandBuffers = &c;
     s.commandBufferCount = 1;
     ctx->device->graphicsQueue->submit(s);
-
-    page->used += size;
+    ctx->device->graphicsQueue->waitOnHost();
     return GPU_SUCCESS;
 }
 
 GpuResult gpuFrameRequestReadback(GpuFrameContext ctx, GpuBufferHandle src,
-                                  uint64_t offset, uint64_t size, void** outPtr)
+                                   uint64_t offset, uint64_t size, void** outPtr)
 {
     if (!ctx || !outPtr) return GPU_ERROR_INVALID_ARGS;
     *outPtr = nullptr;
@@ -325,15 +294,21 @@ GpuResult gpuFrameRequestReadback(GpuFrameContext ctx, GpuBufferHandle src,
     s.commandBuffers = &c;
     s.commandBufferCount = 1;
     ctx->device->graphicsQueue->submit(s);
+    ctx->device->graphicsQueue->waitOnHost();
+
+    void* ptr = nullptr;
+    if (SLANG_FAILED(ctx->device->rhiDevice->mapBuffer(staging, rhi::CpuAccessMode::Read, &ptr)))
+        return GPU_ERROR_INTERNAL;
 
     std::lock_guard<std::mutex> lk(ctx->mtx);
     Readback rr;
     rr.staging = staging;
     rr.fence = ctx->lastSubmit;
-    rr.mapped = nullptr;
+    rr.mapped = ptr;
     rr.size = size;
-    rr.done = false;
+    rr.done = true;
     ctx->readbacks.push_back(rr);
+    *outPtr = ptr;
     return GPU_SUCCESS;
 }
 
@@ -342,4 +317,15 @@ uint32_t gpuFrameGetInFlightCount(GpuFrameContext ctx)
     if (!ctx) return 0;
     uint64_t done = gpuFenceGetCurrentValue(ctx->frameFence);
     return (uint32_t)(ctx->lastSubmit > done ? ctx->lastSubmit - done : 0);
+}
+
+void gpuSetFrameContext(GpuDevice device, GpuFrameContext ctx)
+{
+    if (!device) return;
+    device->frameContext = ctx;
+}
+
+GpuFrameContext gpuGetFrameContext(GpuDevice device)
+{
+    return device ? device->frameContext : nullptr;
 }

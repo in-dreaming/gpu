@@ -8,6 +8,8 @@
 #include "gpu/core/gpu_handle_pool.h"
 #include "gpu/resource/gpu_barrier.h"
 
+typedef struct GpuFrameContext_t* GpuFrameContext;
+
 // Forward declaration
 struct GpuTensorData;
 
@@ -19,6 +21,7 @@ struct GpuDevice_t {
     rhi::ComPtr<rhi::ICommandQueue> graphicsQueue;
     rhi::ComPtr<rhi::ICommandQueue> computeQueue;
     rhi::ComPtr<rhi::ICommandQueue> transferQueue;
+    GpuFrameContext frameContext;
     GpuHandlePool<rhi::IBuffer> bufferPool;
     GpuHandlePool<rhi::ITexture> texturePool;
     GpuHandlePool<rhi::ITextureView> textureViewPool;

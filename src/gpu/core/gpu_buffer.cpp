@@ -2,6 +2,7 @@
 #include "gpu/core/gpu_device.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/debug/gpu_validation.h"
+#include "gpu/resource/gpu_frame_context.h"
 
 static GpuResourceState gpuDefaultBufferState(GpuBufferUsage usage)
 {
@@ -97,6 +98,11 @@ GpuResult gpuDestroyBuffer(GpuDevice device, GpuBufferHandle handle)
 
     rhi::IBuffer* buf = device->bufferPool.resolve(handle.index, handle.generation);
     if (!buf) return GPU_ERROR_INVALID_ARGS;
+
+    if (device->frameContext) {
+        gpuFrameDeferDestroyBuffer(device->frameContext, handle);
+        return GPU_SUCCESS;
+    }
 
     if (device->graphicsQueue) {
         device->graphicsQueue->waitOnHost();
