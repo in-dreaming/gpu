@@ -127,11 +127,66 @@ if(GPU_INSTALL)
     copy_gpu_example_runtime_assets(21_sponza_data_driven)
 endif()
 
-# Demo 24: Sponza with Render Graph + Shadow + Multi-Light
-add_gpu_example(24_sponza_graph SHADERS shadow.slang forward.slang)
+# Demo 24: Sponza with Render Graph + CSM + 1K Lights + SSGI
+set(24_SPONZA_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/camera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/sponza_loader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/render_resources.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/material_textures.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/pipelines.cpp
+)
+set(24_SPONZA_SHADERS
+    shadow.slang forward.slang ssgi.slang light_cull.slang
+)
+add_executable(24_sponza_graph ${24_SPONZA_SOURCES})
+target_link_libraries(24_sponza_graph PRIVATE gpu)
+set_target_properties(24_sponza_graph PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    VS_DEBUGGER_WORKING_DIRECTORY "${_out_dir}"
+    VS_DEBUGGER_ENVIRONMENT "PATH=${_rhi_dir}\;$<TARGET_FILE_DIR:SDL3-shared>\;%PATH%"
+)
+if(MSVC)
+    target_compile_options(24_sponza_graph PRIVATE /W4 /WX)
+else()
+    target_compile_options(24_sponza_graph PRIVATE -Wall -Wextra -Werror -pedantic)
+endif()
 target_include_directories(24_sponza_graph PRIVATE
+    "${CMAKE_SOURCE_DIR}/examples/24_sponza_graph"
     "${CMAKE_SOURCE_DIR}/modules/3rd/slang-rhi/external/stb"
 )
+add_dependencies(24_sponza_graph slang-rhi-copy-files)
+
+set(_out_dir "$<TARGET_FILE_DIR:24_sponza_graph>")
+set(_rhi_dir "${CMAKE_BINARY_DIR}/modules/3rd/slang-rhi")
+
+add_custom_command(TARGET 24_sponza_graph POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}/D3D12"
+)
+foreach(_dll
+    slang.dll slang-compiler.dll slang-glslang.dll slang-llvm.dll slang-rt.dll
+    dxcompiler.dll dxil.dll WinPixEventRuntime.dll dawn.dll
+)
+    add_custom_command(TARGET 24_sponza_graph POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_rhi_dir}/${_dll}" "${_out_dir}/${_dll}"
+    )
+endforeach()
+foreach(_dll D3D12/D3D12Core.dll D3D12/d3d12SDKLayers.dll)
+    add_custom_command(TARGET 24_sponza_graph POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_rhi_dir}/${_dll}" "${_out_dir}/${_dll}"
+    )
+endforeach()
+add_custom_command(TARGET 24_sponza_graph POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3-shared>" "${_out_dir}/"
+)
+foreach(_shader shadow.slang forward.slang ssgi.slang light_cull.slang)
+    add_custom_command(TARGET 24_sponza_graph POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/shaders/${_shader}"
+            "${_out_dir}/${_shader}"
+    )
+endforeach()
 
 if(GPU_SPONZA_ROOT)
     if(EXISTS "${GPU_SPONZA_ROOT}/sponza.obj" AND EXISTS "${GPU_SPONZA_ROOT}/sponza.mtl")
