@@ -29,9 +29,19 @@ typedef enum {
 
 void gpuCmdSetBufferState(GpuDevice device, GpuCommandEncoder encoder, GpuBufferHandle buffer, GpuResourceState state);
 void gpuCmdSetTextureState(GpuDevice device, GpuCommandEncoder encoder, GpuTextureHandle texture, GpuResourceState state);
+void gpuCmdSetTextureSubresourceState(GpuDevice device, GpuCommandEncoder encoder, GpuTextureHandle texture,
+                                       uint32_t mipLevel, uint32_t arrayLayer, GpuResourceState state);
 void gpuCmdGlobalBarrier(GpuCommandEncoder encoder);
 GpuResourceState gpuGetBufferState(GpuDevice device, GpuBufferHandle buffer);
 GpuResourceState gpuGetTextureState(GpuDevice device, GpuTextureHandle texture);
+GpuResourceState gpuGetTextureSubresourceState(GpuDevice device, GpuTextureHandle texture,
+                                               uint32_t mipLevel, uint32_t arrayLayer);
+
+typedef struct GpuSubresourceStateRecord_t* GpuSubresourceTracker;
+GpuResult gpuSubresourceTrackerCreate(GpuDevice device, GpuTextureHandle texture, GpuSubresourceTracker* out);
+void gpuSubresourceTrackerDestroy(GpuSubresourceTracker tracker);
+GpuResourceState gpuSubresourceTrackerGet(GpuSubresourceTracker tracker, uint32_t mip, uint32_t layer);
+void gpuSubresourceTrackerSet(GpuSubresourceTracker tracker, uint32_t mip, uint32_t layer, GpuResourceState state);
 
 #ifdef __cplusplus
 }

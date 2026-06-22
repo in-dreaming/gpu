@@ -36,7 +36,10 @@ set(GPU_PUBLIC_HEADERS
     bindless/gpu_bindless_heap.h
     # Phase 3 - Capability
     capability/gpu_feature_gating.h
+    capability/gpu_feature_info.h
     capability/gpu_fallback_registry.h
+    # Phase B - Lifecycle
+    resource/gpu_frame_context.h
     # Phase 3 - AI
     ai/gpu_tensor.h
     ai/gpu_matrix_pipeline.h
@@ -66,6 +69,7 @@ set(GPU_SOURCES
     resource/gpu_readback.cpp
     resource/gpu_streaming_manager.cpp
     resource/gpu_sparse_resource.cpp
+    resource/gpu_frame_context.cpp
     shader/gpu_shader_compiler.cpp
     shader/gpu_slang_module.cpp
     shader/gpu_shader_cache.cpp

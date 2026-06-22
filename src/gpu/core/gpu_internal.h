@@ -11,6 +11,9 @@
 // Forward declaration
 struct GpuTensorData;
 
+struct GpuSubresourceStateRecord_t;
+typedef GpuSubresourceStateRecord_t* GpuSubresourceTracker;
+
 struct GpuDevice_t {
     rhi::ComPtr<rhi::IDevice> rhiDevice;
     rhi::ComPtr<rhi::ICommandQueue> graphicsQueue;
@@ -26,6 +29,7 @@ struct GpuDevice_t {
     GpuHandlePool<GpuTensorData> tensorPool;
     GpuResourceState bufferStates[GpuHandlePool<rhi::IBuffer>::capacity()] = {};
     GpuResourceState textureStates[GpuHandlePool<rhi::ITexture>::capacity()] = {};
+    GpuSubresourceTracker subresourceTrackers[GpuHandlePool<rhi::ITexture>::capacity()] = {};
 };
 
 struct GpuCommandEncoder_t {
