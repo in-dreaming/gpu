@@ -23991,3 +23991,884 @@ _**Agent (gpt-5.5 2026-06-21 14:58:15Z)**_
 - `ctest --test-dir build -C Debug --output-on-failure` 通过，4/4 passed
 
 改动集中在 `src/gpu/...` 和 [tests/smoke/main.c](G:/work/tech/infra/gpu/tests/smoke/main.c)。工作区里 `.specstory/*` 和 `review.md` 仍然是已有未纳入本次修改的变更/未跟踪文件，我没有动它们。
+
+---
+
+_**User (2026-06-21 15:01:11Z)**_
+
+那现在是否可以作为游戏引擎的rhi了？
+
+
+---
+
+_**Agent (gpt-5.5 2026-06-21 15:01:25Z)**_
+
+还不能说“已经可以作为完整游戏引擎 RHI”，但现在更接近“可继续演进的 RHI 原型/实验层”。
+
+我的判断是：
+
+**可以用来做**
+- 小型 demo、技术验证、离线工具渲染。
+- 引擎早期 renderer prototype。
+- D3D12/Vulkan 之上的 slang-rhi 封装实验。
+- bindless、texture streaming、pipeline、buffer/texture、compute、Sponza 这类高级 demo 的探索。
+
+**还不建议直接作为正式游戏引擎 RHI**
+核心原因不是功能数量，而是“工程合同还不够硬”：
+
+- 资源状态还只是显式状态记录，不是完整 hazard/barrier resolver。
+- render pass / framebuffer / swapchain / transient attachment / MSAA resolve 还没有形成现代 frame graph 级别模型。
+- descriptor/bindless 已经真实很多，但还没有完整 descriptor table/update-after-bind/heap residency/跨 backend 限制抽象。
+- pipeline layout、root signature、shader reflection 到 bind layout 的稳定合同还不够完整。
+- lifetime 现在用 wait idle 保守正确，但不适合游戏引擎性能，需要 frame fence 延迟销毁、上传 ring、资源回收队列。
+- sparse/VT 目前是明确 unsupported 或 demo 级封装，还不是引擎级 virtual texture residency 系统。
+- 缺少 backend conformance tests：同一测试矩阵跑 D3D12/Vulkan/CPU/未来 Metal，验证行为一致。
+- 缺少调试层：资源命名、错误回调、validation message、capture marker、GPU crash breadcrumbs。
+- 多线程 command recording、queue ownership、async compute/transfer 同步合同还不够强。
+
+所以一句话：**现在可以作为“游戏引擎 RHI 的基础骨架”，但还不是 production-ready RHI。**
+
+如果要把它推进到真正可用的引擎 RHI，我会优先补这几块：frame graph、延迟销毁/上传系统、descriptor layout/reflection 合同、自动/半自动 resource barrier、backend conformance test、错误诊断层。现在的方向是对的，尤其这次把 fake success 改成真实成功或明确 unsupported，这一点很关键。
+
+---
+
+_**User (2026-06-22 01:02:10Z)**_
+
+输出一份说明文档，说明要实现production-ready后需要做的事情以及如何做、对应架构等。
+
+
+---
+
+_**Agent (gpt-5.5 2026-06-22 01:02:21Z)**_
+
+我会在仓库里补一份面向工程落地的说明文档，不写空泛 checklist，而是把 production-ready RHI 还缺什么、为什么缺、推荐架构和阶段化实施路径写清楚。先看一下现有文档目录风格。
+
+_**Agent (gpt-5.5 2026-06-22 01:02:21Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="shell_command"><details>
+<summary>Tool use: **shell_command** `Get-ChildItem -Force`</summary>
+```
+execution error: Io(Custom { kind: Other, error: "windows sandbox: CreateProcessWithLogonW failed: 1385" })
+```
+</details></tool-use>
+
+_**Agent (gpt-5.5 2026-06-22 01:02:21Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="shell_command"><details>
+<summary>Tool use: **shell_command** `Get-ChildItem -Recurse -File -Include *.md | Select-Object FullName,Length,LastWriteTime`</summary>
+```
+execution error: Io(Custom { kind: Other, error: "windows sandbox: CreateProcessWithLogonW failed: 1385" })
+```
+</details></tool-use>
+
+_**Agent (gpt-5.5 2026-06-22 01:02:21Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="shell_command"><details>
+<summary>Tool use: **shell_command** `Get-Content README.md -TotalCount 120`</summary>
+```
+execution error: Io(Custom { kind: Other, error: "windows sandbox: CreateProcessWithLogonW failed: 1385" })
+```
+</details></tool-use>
+
+_**Agent (gpt-5.5 2026-06-22 01:02:30Z)**_
+
+这个 Windows 沙箱还是启动 PowerShell 失败（1385）。我用提权只做只读检查，确定文档落点后再写文件。
+
+_**Agent (gpt-5.5 2026-06-22 01:02:30Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="shell_command"><details>
+<summary>Tool use: **shell_command** `Get-ChildItem -Force`</summary>
+```
+Exit code: 0
+Wall time: 0.7 seconds
+Output:
+
+    Directory: G:\work\tech\infra\gpu
+
+[32;1mMode   [0m[32;1m              LastWriteTime[0m [32;1;3m        Length[0m[32;1m Name[0m
+[32;1m----   [0m [32;1m             -------------[0m [32;1m        ------[0m [32;1m----[0m
+d--h-           2026/6/21    23:01                [34;1m.git[0m
+d----           2026/6/17    10:23                [34;1m.github[0m
+d----           2026/6/22     9:02                [34;1m.specstory[0m
+d----           2026/6/21    17:39                [34;1mbuild[0m
+d----           2026/6/16    23:58                [34;1mdocs[0m
+d----           2026/6/19    23:33                [34;1mexamples[0m
+d----           2026/6/16    23:47                [34;1mmodules[0m
+d----           2026/6/17    10:23                [34;1msrc[0m
+d----           2026/6/18    11:56                [34;1mTesting[0m
+d----           2026/6/18    17:30                [34;1mtests[0m
+-a---           2026/6/16    21:10            113 .cursorindexingignore
+-a---           2026/6/17    11:00             73 .gitignore
+-a---           2026/6/17    17:51            392 .gitmodules
+-a---           2026/6/21     9:12           1454 CMakeLists.txt
+-a---           2026/6/16    21:10           1089 LICENSE
+-a---           2026/6/17    18:01           7984 README.md
+-a---           2026/6/18    17:11           8976 review.md
+-a---           2026/6/17    18:03              0 stderr.txt
+
+[31;1mSet-PSReadLineOption: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:30[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  30 | [0m [36;1mSet-PSReadLineOption -PredictionSource History[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mThe predictive suggestion feature cannot be enabled because the console output doesn't support virtual terminal[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m[36;1m     | [31;1mprocessing or it's redirected.[0m
+[31;1mSet-PSReadLineOption: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:46[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  46 | [0m     [36;1mSet-PSReadLineOption -PredictionSource HistoryAndPlugin[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mThe predictive suggestion feature cannot be enabled because the console output doesn't support virtual terminal[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m[36;1m     | [31;1mprocessing or it's redirected.[0m
+[31;1mSet-PSReadLineOption: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:47[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  47 | [0m     [36;1mSet-PSReadLineOption -PredictionViewStyle ListView[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1m句柄无效。[0m
+[31;1m&: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:61[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  61 | [0m Invoke-Expression (&[36;1mstarship[0m init powershell)[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m                     ~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mThe term 'starship' is not recognized as a name of a cmdlet, function, script file, or executable program. Check[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m[36;1m     | [31;1mthe spelling of the name, or if a path was included, verify that the path is correct and try again.[0m
+```
+</details></tool-use>
+
+_**Agent (gpt-5.5 2026-06-22 01:02:30Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="shell_command"><details>
+<summary>Tool use: **shell_command** `Get-ChildItem -Recurse -File -Include *.md | Select-Object FullName,Length,LastWriteTime`</summary>
+```
+Exit code: 0
+Wall time: 3 seconds
+Total output lines: 864
+Output:
+
+[32;1mFullName                                                                                [0m[32;1m  Length[0m[32;1m LastWriteTime[0m
+[32;1m--------                                                                                [0m [32;1m ------[0m [32;1m-------------[0m
+G:\work\tech\infra\gpu\.specstory\history\2026-06-19_15-22-07Z-review-todo-stub-slang.md  284933 2026/6/21 9:07:38
+G:\work\tech\infra\gpu\.specstory\history\2026-06-19_15-22-38Z-the-following-is-the.md    197098 2026/6/20 11:02:57
+G:\work\tech\infra\gpu\.specstory\history\2026-06-20_17-54-01Z-the-following-is-the.md    113322 2026/6/21 10:38:40
+G:\work\tech\infra\gpu\.specstory\history\2026-06-21_01-08-37Z-review-todo-stub-slang.md 1042932 2026/6/22 9:02:24
+G:\work\tech\infra\gpu\.specstory\history\2026-06-21_01-11-36Z-the-following-is-the.md    414430 2026/6/21 21:15:30
+G:\work\tech\infra\gpu\.specstory\history\2026-06-21_14-12-16Z-the-following-is-the.md    364343 2026/6/22 0:45:39
+G:\work\tech\infra\gpu\build\_deps\agility_sdk-src\README.md                               15685 2026/6/17 10:32:26
+G:\work\tech\infra\gpu\build\_deps\dxc-src\ReleaseNotes.md                                 20405 2026/6/17 10:32:13
+G:\work\tech\infra\gpu\build\_deps\optix_8_0-src\README.md                                   727 2026/6/17 10:32:37
+G:\work\tech\infra\gpu\build\_deps\optix_8_1-src\README.md                                   727 2026/6/17 10:32:41
+G:\work\tech\infra\gpu\build\_deps\optix_9_0-src\README.md                                   899 2026/6/17 10:32:45
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\.github\PULL_REQUEST_TEMPLATE.md                 226 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\INTRO-androidstudio.md                      552 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\INTRO-cmake.md                             1607 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\INTRO-emscripten.md                        1545 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\INTRO-mingw.md                             3489 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\INTRO-visualstudio.md                      1078 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\INTRO-xcode.md                             1068 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-android.md                         27121 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-bsd.md                               224 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-cmake.md                           16166 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-contributing.md                     5151 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-documentation-rules.md             15646 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-dynapi.md                           6927 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-emscripten.md                      13932 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-gdk.md                             12445 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-haiku.md                              98 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-highdpi.md                          4424 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-ios.md                             13847 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-kmsbsd.md                           1473 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-linux.md                            4156 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-macos.md                            9157 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-main-functions.md                   9912 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-migration.md                      120208 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-n3ds.md                             1553 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-ngage.md                             178 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-platforms.md                        1176 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-porting.md                          2107 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-ps2.md                              1401 2026/6/17 10:31:27
+G:\work\tech\infra\gpu\build\_deps\sdl3-src\docs\README-ps4.md                    
+... (truncated)
+```
+</details></tool-use>
+
+_**Agent (gpt-5.5 2026-06-22 01:02:30Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="shell_command"><details>
+<summary>Tool use: **shell_command** `Get-Content README.md -TotalCount 120`</summary>
+```
+Exit code: 0
+Wall time: 0.7 seconds
+Output:
+# gpu
+
+A C API GPU abstraction layer built on [Slang](https://github.com/shader-slang/slang) and [slang-rhi](https://github.com/shader-slang/slang-rhi), with SDL3 for cross-platform windowing.
+
+## Design
+
+- **Pure C API** — all public headers are C11 with `extern "C"` guards; C++ is hidden behind PIMPL in `.cpp` implementation files
+- **Shader-Centric** — Slang reflection drives resource layout, eliminating hand-maintained binding tables
+- **Opaque handles** — `GpuDevice`, `GpuCommandQueue`, `GpuSurface`, etc. are pointer-sized opaque types; internal structs are never exposed
+- **Generational handles** — `GpuBufferHandle`, `GpuTextureHandle` use index+generation pairs for safe resource pooling
+- **Backend auto-selection** — `gpuCreateDevice` tries Default → Vulkan → D3D12 automatically
+- **Cross-platform** — Windows (Vulkan, D3D12), Linux (Vulkan), macOS (Metal), Web (WebGPU)
+
+## Quick Start
+
+### Prerequisites
+
+- CMake 3.24+
+- C11 / C++20 compiler (MSVC, GCC, Clang)
+- Git (submodules required)
+
+### Build
+
+```bash
+git clone --recurse-submodules https://github.com/your-org/gpu.git
+cd gpu
+cmake -B build
+cmake --build build --config Release
+```
+
+### Build with Tests
+
+```bash
+cmake -B build -DGPU_BUILD_TESTS=ON
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+### Run Examples
+
+```bash
+# Windows: runtime DLLs are auto-copied next to exe via POST_BUILD
+build\examples\Release\00_window.exe
+build\examples\Release\00_window_clear.exe
+build\examples\Release\01_device_init.exe
+```
+
+## API Usage
+
+Single header entry point:
+
+```c
+#include "gpu/gpu.h"
+```
+
+### Create window + device + surface
+
+```c
+gpuPlatformInit();
+
+GpuWindow window;
+GpuWindowDesc winDesc = { .title = "app", .width = 800, .height = 600, .vsync = true, .resizable = true };
+gpuCreateWindow(&winDesc, &window);
+
+GpuDevice device;
+GpuDeviceDesc devDesc = { .appName = "app", .enableDebugLayer = false };
+gpuCreateDevice(&devDesc, &device);
+
+GpuSurface surface;
+gpuCreateSurface(device, window, GPU_SURFACE_TYPE_VULKAN, &surface);
+
+GpuFormat fmt = gpuSurfaceGetPreferredFormat(surface);
+gpuSurfaceConfigure(surface, 800, 600, fmt, true);
+```
+
+### Render loop
+
+```c
+GpuCommandQueue queue;
+gpuGetQueue(device, GPU_QUEUE_TYPE_GRAPHICS, &queue);
+
+GpuPlatformEvent ev;
+for (;;) {
+    while (gpuPollEvent(&ev)) {
+        if (ev.type == GPU_PLATFORM_EVENT_QUIT) goto cleanup;
+        if (ev.type == GPU_PLATFORM_EVENT_RESIZE)
+            gpuSurfaceConfigure(surface, ev.resize.width, ev.resize.height, fmt, true);
+    }
+
+    GpuSurfaceTexture backbuffer = NULL;
+    if (gpuSurfaceAcquireNextImage(surface, &backbuffer) != GPU_SUCCESS) continue;
+
+    GpuCommandEncoder enc = gpuBeginCommandEncoder(queue);
+    gpuCmdClearSurfaceTexture(enc, backbuffer, 0.1f, 0.1f, 0.2f, 1.0f);
+
+    GpuCommandBuffer cmd = gpuFinishCommandEncoder(enc);
+    if (cmd) gpuQueueSubmit(queue, 1, &cmd);
+
+    gpuSurfacePresent(surface);
+    gpuSurfaceTextureRelease(backbuffer);
+}
+```
+
+### Resource creation
+
+```c
+GpuBufferHandle buf;
+GpuBufferDesc bufDesc = {
+    .size = 1024 * 1024,
+    .elementSize = 4,
+    .usage = GPU_BUFFER_USAGE_SHADER_RESOURCE | GPU_BUFFER_USAGE_UNORDERED_ACCESS,
+    .label = "my_buffer",
+};
+gpuCreateBuffer(device, &bufDesc, &buf);
+
+GpuTextureHandle tex;
+GpuTextureDesc texDesc = {
+    .type = GPU_TEXTURE_TYPE_2D,
+    .width = 256, .height = 256, .depth = 1,
+    .arrayLength = 1, .mipCount = 1,
+[31;1mSet-PSReadLineOption: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:30[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  30 | [0m [36;1mSet-PSReadLineOption -PredictionSource History[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mThe predictive suggestion feature cannot be enabled because the console output doesn't support virtual terminal[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m[36;1m     | [31;1mprocessing or it's redirected.[0m
+[31;1mSet-PSReadLineOption: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:46[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  46 | [0m     [36;1mSet-PSReadLineOption -PredictionSource HistoryAndPlugin[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mThe predictive suggestion feature cannot be enabled because the console output doesn't support virtual terminal[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m[36;1m     | [31;1mprocessing or it's redirected.[0m
+[31;1mSet-
+... (truncated)
+```
+</details></tool-use>
+
+_**Agent (gpt-5.5 2026-06-22 01:02:47Z)**_
+
+我会把文档放在 `docs/production_ready_rhi.md`，作为路线图/架构说明，不碰已有 `review.md`。内容会按“当前状态、目标架构、模块拆分、实施顺序、验收标准”来写。
+
+_**Agent (gpt-5.5 2026-06-22 01:04:03Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="apply_patch"><details>
+<summary>Tool use: **apply_patch**</summary>
+**Add: `docs/production_ready_rhi.md`**
+
+```diff
++# Production-ready RHI 路线图
++
++本文档说明当前 `gpu` 仓库要成为游戏引擎可用的 production-ready RHI 还需要补齐的能力、推荐架构，以及可执行的实施路径。
++
++当前工程已经具备一个有价值的 RHI 骨架：C API、opaque/generational handle、slang-rhi 后端封装、基础 buffer/texture/pipeline/queue/surface、bindless descriptor handle 获取、resource state 显式记录、Sponza data-driven demo 等。它可以支撑 demo 和 renderer prototype，但还不能直接作为正式游戏引擎 RHI。主要差距不是单个 feature 缺失，而是“跨后端行为合同、生命周期、同步、诊断、测试矩阵”还不够硬。
++
++## 目标定义
++
++Production-ready RHI 的目标不是暴露所有底层 API，而是给引擎上层提供稳定、可预测、可测试的 GPU 合同：
++
++- 同一套 API 在 D3D12、Vulkan、Metal/WebGPU 等后端上语义一致。
++- 错误不会静默成功； unsupported feature 必须可查询、可降级、可诊断。
++- 资源生命周期不依赖全局 `wait idle`，能够支撑多帧 in-flight 和多线程提交。
++- render graph 能自动处理 pass 依赖、barrier、transient resource、aliasing 和 presentation。
++- shader reflection、pipeline layout、descriptor layout、bindless、push/root constants 有稳定 ABI。
++- 所有核心路径有 conformance tests，能在 CI 中跨后端验证。
++- debug/profile/capture 能力足够支持实际项目排障。
++
++## 推荐总体架构
++
++建议将 RHI 分为五层，避免所有能力堆在单个 `gpu_device.cpp` 或 feature 文件里：
++
++```text
++Application / Engine Renderer
++  |
++Render Graph / Frame Scheduler
++  |
++RHI Frontend: C API, handles, validation, feature contract
++  |
++RHI Core: resources, state tracker, descriptors, pipeline cache, upload/lifetime
++  |
++Backend Adapter: slang-rhi + backend-specific capability/fallback glue
++```
++
++各层职责：
++
++- `RHI Frontend`：只处理 public API、参数校验、错误码、handle generation、debug label。
++- `RHI Core`：维护真实状态机和引擎语义，包括 barrier、descriptor allocator、deferred destroy、upload ring、pipeline layout cache。
++- `Render Graph`：把高层 pass/resource intent 转换为命令录制和 barrier，不让业务代码手写大量 resource transition。
++- `Backend Adapter`：只封装 slang-rhi 和必要的 backend workaround，不把 D3D12/Vulkan 细节泄漏到 public API。
++- `Conformance`：用同一批测试验证所有后端的行为一致性。
++
++## 1. Backend Contract 与能力表
++
++### 当前问题
++
++当前能力查询已经存在，但还不够作为 engine contract。部分模块过去会在底层不支持时返回假成功，现在 sparse 已经改为明确 `GPU_ERROR_NOT_SUPPORTED`，但其他高级能力仍需要统一规则。
++
++### 要做什么
++
++- 建立 `GpuBackendCaps`，区分 `supported`、`emulated`、`unsupported` 三种状态。
++- 每个高级特性都必须有 fallback 策略：
++  - `native`：后端原生支持。
++  - `emulated`：RHI 层可正确模拟，但必须声明性能代价。
++  - `unsupported`：返回 `GPU_ERROR_NOT_SUPPORTED`，不得假成功。
++- 对 bindless、ray tracing、mesh shader、work graph、sparse resource、timeline fence、descriptor indexing、multi-queue、present mode 做细粒度 caps。
++- 所有 public create/request 函数在进入后端前先过 feature gate。
++
++### 推荐接口
++
++```c
++typedef enum GpuFeatureSupport {
++    GPU_FEATURE_SUPPORT_UNSUPPORTED = 0,
++    GPU_FEATURE_SUPPORT_EMULATED = 1,
++    GPU_FEATURE_SUPPORT_NATIVE = 2,
++} GpuFeatureSupport;
++
++typedef struct GpuFeatureInfo {
++    GpuFeatureSupport support;
++    uint32_t limit;
++    const char* reason;
++} GpuFeatureInfo;
++
++GpuResult gpuGetFeatureInfo(GpuDevice device, GpuFeature feature, GpuFeatureInfo* outInfo);
++```
++
++### 验收标准
++
++- 每个 feature 都有测试验证 unsupported path。
++- 示例程序不能依赖未声明能力。
++- CI 输出后端能力 JSON，便于比对机器差异。
++
++## 2. Resource Lifetime 与内存系统
++
++### 当前问题
++
++当前 destroy 路径为了正确性可以等待 queue idle，但游戏引擎不能频繁全局等待。需要多帧延迟销毁和资源回收机制。
++
++### 要做什么
++
++- 建立 frame index / timeline fence 驱动的 deferred destroy queue。
++- 资源销毁只把对象放入 retire list，等 GPU fence 到达后释放。
++- 区分 committed resource、placed/aliasing resource、upload/readback/transient resource。
++- 建立 upload ring buffer：
++  - per-frame staging pages。
++  - 大上传走 dedicated staging allocation。
++  - 支持 buffer/texture row pitch 和 subresource layout。
++- 建立 readback queue，避免同步 map 阻塞主线程。
++
++### 推荐结构
++
++```cpp
++struct GpuRetiredObject {
++    enum Kind { Buffer, Texture, TextureView, Pipeline, ShaderObject } kind;
++    uint64_t retireFenceValue;
++    void* object;
++};
++
++struct GpuFrameContext {
++    uint64_t frameIndex;
++    uint64_t submittedFenceValue;
++    UploadArena uploadArena;
++    std::vector<GpuRetiredObject> retiredObjects;
++};
++```
++
++### 验收标准
++
++- destroy 不调用全局 `waitOnHost`。
++- N 帧 in-flight 下资源销毁、重建、slot reuse 不产生 use-after-free。
++- 有压力测试：每帧创建/销毁大量 buffer/texture，跑 10000 帧无泄漏、无 validation error。
++
++## 3. Resource State Tracker 与 Barrier Resolver
++
++### 当前问题
++
++当前有显式状态记录，但还不是完整 hazard resolver。引擎上层仍容易忘记 transition，或者在多 pass、多 queue 下产生错误。
++
++### 要做什么
++
++- 为每个 resource/subresource 维护状态：
++  - whole resource state。
++  - texture mip/layer/aspect state。
++  - queue ownership。
++- 支持 read state 合并、write state 冲突检测。
++- Render Graph 编译阶段根据 pass read/write intent 自动插入 barrier。
++- 手写 command path 仍允许显式 transition，但 debug 模式要验证状态。
++- 支持 aliasing barrier、UAV barrier/global barrier、present acquire/release。
++
++### 推荐模型
++
++```cpp
++struct GpuSubresourceState {
++    GpuResourceState state;
++    GpuQueueType ownerQueue;
++    uint64_t lastWriterPass;
++};
++
++struct GpuResourceStateRecord {
++    GpuHandle handle;
++    bool splitPerSubresource;
++    GpuSubresourceState whole;
++    std::vector<GpuSubresourceState> subresources;
++};
++```
++
++### 验收标准
++
++- render graph 测试能自动完成 `CopyDest -> ShaderResource -> RenderTarget -> Present`。
++- debug 模式下错误读写顺序能报出资源名、pass 名、旧状态、新状态。
++- 多 queue transfer->graphics ownership transfer 有测试。
++
++## 4. Render Graph / Frame Graph
++
++### 当前问题
++
++当前 render pass 和 command API 仍偏底层，缺少正式 frame graph。游戏引擎需要让 pass 描述“读什么、写什么”，而不是每处手写 barrier 和 lifetime。
++
++### 要做什么
++
++- 增加 graph builder：
++  - logical resources。
++  - imported resources，如 swapchain backbuffer。
++  - pass read/write declarations。
++  - attachment load/store/clear/resolve。
++- graph compile 阶段：
++  - cull unused pass。
++  - 计算 pass 顺序。
++  - 分配 transient resource。
++  - 插入 barriers。
++  - alias compatible transient resources。
++- graph execute 阶段：
++  - 创建 command encoder。
++  - begin/end render/compute/copy pass。
++  - 调用 pass callback。
++
++### 推荐 API 草案
++
++```c
++GpuGraph graph;
++gpuGraphCreate(device, &graph);
++
++GpuGraphTexture gbuffer =
++    gpuGraphCreateTexture(graph, &desc, "gbuffer.albedo");
++
++gpuGraphAddRenderPass(graph, "gbuffer")
++    .writeColor(gbuffer, GPU_LOAD_CLEAR, GPU_STORE_STORE)
++    .writeDepth(depth, GPU_LOAD_CLEAR, GPU_STORE_STORE)
++    .execute(callback, userData);
++
++gpuGraphCompile(graph);
++gpuGraphExecute(graph, queue);
++```
++
++### 验收标准
++
++- 示例 `deferred + shadow + postprocess + present` 不需要用户手写 texture state transition。
++- transient attachment 可以复用内存。
++- graph dump 可输出 DOT/JSON，便于调试。
++
++## 5. Descriptor / Bindless / Pipeline Layout
++
++### 当前问题
++
++bindless 现在已经能获取真实 slang-rhi descriptor handle，但还需要完整 layout contract：shader reflection 到 descriptor layout、pipeline layout、parameter block、bindless table 的关系必须稳定。
++
++### 要做什么
++
++- 从 Slang reflection 生成统一 `GpuPipelineLayout`：
++  - descriptor set/space。
++  - binding。
++  - resource kind。
++  - array count。
++  - bindless handle field。
++  - push/root constants。
++- 建立 descriptor allocator：
++  - transient descriptors。
++  - persistent descriptors。
++  - bindless descriptor heap/table。
++  - sampler heap。
++- `GpuBindlessHeap` 支持 texture、buffer、sampler、acceleration structure。
++- 支持 descriptor update lifetime：资源被释放时 bindless slot 要 invalid 或 retain。
++- pipeline cache key 必须包含 shader identity、entry point、layout hash、render target format、raster/depth/blend state。
++
++### 推荐结构
++
++```cpp
++struct GpuBindingLayout {
++    uint32_t set;
++    uint32_t binding;
++    GpuResourceKind kind;
++    uint32_t count;
++    bool bindless;
++};
++
++struct GpuPipelineLayout {
++    uint64_t layoutHash;
++    std::vector<GpuBindingLayout> bindings;
++    std::vector<GpuPushConstantRange> pushConstants;
++};
++```
++
++### 验收标准
++
++- reflection 结果稳定序列化为 JSON。
++- 同一 shader 在 D3D12/Vulkan 下 binding layout 一致或有明确映射。
++- bindless texture/buffer/sampler 都有 conformance tests。
++- pipeline cache 命中率可统计。
++
++## 6. Command Model 与多线程录制
++
++### 当前问题
++
++当前 command model 已经避免了空 render pass 假成功，但还需要明确 command allocator、command list、pass encoder 的 ownership/lifetime。
++
++### 要做什么
++
++- 建立 per-thread command context pool。
++- 明确 command buffer 状态机：
++  - initial。
++  - recording。
++  - executable。
++  - submitted。
++  - retired。
++- 支持 bundle/secondary command buffer 或 backend 等价模拟。
++- 所有 `gpuCmd*` 在 debug 模式下校验当前 pass 类型。
++- graphics/compute/copy 命令分离，避免 compute pass 自动创建等隐式行为长期存在。
++
++### 验收标准
++
++- 多线程录制 100 个 pass，主线程提交，不崩溃、不数据竞争。
++- 错误 pass 类型调用返回可诊断 validation message。
++- command buffer 重复提交、提交后录制、未 finish 提交都有测试。
++
++## 7. Swapchain / Surface / Presentation
++
++### 当前问题
++
++示例和基础 surface 已可运行，但引擎需要完整 present contract。
++
++### 要做什么
++
++- 统一 acquire/present 状态转换。
++- 支持 resize、format change、surface lost、minimized window。
++- 支持 present mode 查询与选择：vsync、mailbox、immediate。
++- 支持 HDR、color space、sRGB policy。
++- backbuffer 作为 imported graph texture 接入 render graph。
++
++### 验收标准
++
++- resize storm 测试通过。
++- alt-tab/minimize/recreate 测试通过。
++- present 前状态必须为 `PRESENT`，debug 模式验证。
++
++## 8. Shader Toolchain 与 Pipeline Cache
++
++### 当前问题
++
++已有 Slang 编译基础，但 production-ready 需要工程化 shader DB、cache、热重载和稳定 diagnostics。
++
++### 要做什么
++
++- Shader asset pipeline：
++  - source path。
++  - module name。
++  - entry points。
++  - defines/capabilities。
++  - target profile。
++  - reflection JSON。
++  - binary cache。
++- 支持 offline compile 和 runtime fallback compile。
++- pipeline cache 分两层：
++  - shader binary cache。
++  - PSO cache。
++- diagnostic 统一输出文件、行号、entry point、target、backend。
++- shader hot reload 必须安全替换 pipeline，旧 pipeline 延迟销毁。
++
++### 验收标准
++
++- 改 shader 后 demo 可热重载。
++- cache cold/warm 时间可统计。
++- shader compile 失败能定位到源码行。
++
++## 9. Debug / Validation / Profiling
++
++### 当前问题
++
++缺少引擎开发所需的“出了错知道为什么”的系统。
++
++### 要做什么
++
++- Debug name 覆盖所有 backend object。
++- Validation callback：
++  - severity。
++  - object label。
++  - command/pass context。
++  - suggested fix。
++- GPU markers：
++  - begin/end event。
++  - pass marker。
++  - resource marker。
++- Timestamp query / pipeline statistics。
++- GPU crash breadcrumbs：
++  - D3D12 DRED/Aftermath 可选。
++  - Vulkan device lost diagnostics。
++
++### 验收标准
++
++- RenderDoc/PIX/Nsight capture 里对象和 pass 有可读名称。
++- validation test 能精确报告错误 API 和资源名。
++- frame profiler 可输出每个 pass GPU time。
++
++## 10. Testing 与 CI
++
++### 当前问题
++
++已有 smoke/phase tests，但 production-ready 需要 backend conformance 和长期压力测试。
++
++### 要做什么
++
++- 测试分层：
++  - unit：handle pool、descriptor allocator、state tracker。
++  - conformance：同一 API 在所有后端行为一致。
++  - render：小图 readback 比对。
++  - stress：资源 churn、多线程、resize、device lost。
++  - examples：所有 examples 至少 headless smoke。
++- 每个 feature 有 native/unsupported path 测试。
++- CI matrix：
++  - Windows D3D12。
++  - Windows Vulkan。
++  - Linux Vulkan。
++  - macOS Metal，如果后端接入。
++  - CPU/null backend，用于快速合同测试。
++
++### 验收标准
++
++- 每个 PR 跑 unit + smoke。
++- nightly 跑 full conformance + stress。
++- 渲染测试输出图片 diff。
++
++## 11. Virtual Texture / Streaming / Sparse
++
++### 当前问题
++
++Sponza demo 可以展示数据驱动和软件 VT 思路，但 production VT 需要完整 residency、page table、feedback 和 streaming pipeline。slang-rhi 当前 sparse 能力未统一暴露时，RHI 应明确 unsupported。
++
++### 要做什么
++
++- 软件 VT 路线：
++  - physical texture atlas。
++  - page table texture。
++  - feedback buffer。
++  - CPU/GPU page request resolve。
++  - streaming upload queue。
++- 硬件 sparse 路线：
++  - 后端暴露 sparse caps 后接入 native sparse mapping。
++  - 和软件 VT 共享上层 residency manager。
++- streaming manager：
++  - 支持 row pitch、slice pitch、多个 subresource。
++  - 支持 upload budget、优先级、取消请求。
++  - 支持异步 transfer queue。
++
++### 验收标准
++
++- 大场景 texture working set 可控。
++- camera 快速移动时不会阻塞主线程。
++- page miss、resident pages、upload bandwidth 有统计。
++
++## 12. 分阶段实施计划
++
++### Phase A：合同硬化
++
++- 完成 feature support 三态能力表。
++- 所有 unsupported feature 返回明确错误。
++- resource/command/pipeline public API 增加 validation。
++- 建立 validation callback。
++
++### Phase B：生命周期与同步
++
++- 引入 frame context、timeline fence、deferred destroy。
++- 替换 destroy path 中的 `wait idle`。
++- 建立 upload ring/readback queue。
++- 完成 subresource state tracker。
++
++### Phase C：Render Graph
++
++- 增加 graph resource/pass builder。
++- 实现 graph compile barrier。
++- swapchain backbuffer 作为 imported resource。
++- 迁移至少两个 example 到 graph path。
++
++### Phase D：Descriptor/Layout/Pipeline
++
++- Slang reflection 生成 `GpuPipelineLayout`。
++- descriptor allocator 和 bindless table 完整化。
++- pipeline cache key 和 serialization。
++- shader reflection JSON/conformance tests。
++
++### Phase E：Backend conformance
++
++- 后端矩阵测试。
++- render readback tests。
++- stress tests。
++- capture marker/profiling 完整化。
++
++### Phase F：Engine integration
++
++- 接入真实 renderer workload。
++- 接入 asset/shader pipeline。
++- 接入 hot reload。
++- 性能基准和内存基准。
++
++## 结论
++
++当前工程适合作为游戏引擎 RHI 的基础骨架继续推进，但 production-ready 的关键不在“再加几个 demo”，而在把语义合同做硬：能力表、生命周期、barrier、render graph、descriptor layout、pipeline cache、debug/profiling、conformance tests。推荐优先实现 Phase A 到 Phase C；完成后，这个 RHI 才会从“可演示”进入“可承载真实 renderer”的阶段。
+```
+
+
+```
+Exit code: 0
+Wall time: 0.1 seconds
+Output:
+Success. Updated the following files:
+A docs/production_ready_rhi.md
+```
+</details></tool-use>
+
+_**Agent (gpt-5.5 2026-06-22 01:04:05Z)**_
+
+文档已写入。最后我确认一下文件状态，然后给你路径和内容摘要。
+
+_**Agent (gpt-5.5 2026-06-22 01:04:06Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="shell_command"><details>
+<summary>Tool use: **shell_command** `git status --short docs\production_ready_rhi.md`</summary>
+```
+Exit code: 0
+Wall time: 0.7 seconds
+Output:
+?? docs/production_ready_rhi.md
+[31;1mSet-PSReadLineOption: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:30[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  30 | [0m [36;1mSet-PSReadLineOption -PredictionSource History[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mThe predictive suggestion feature cannot be enabled because the console output doesn't support virtual terminal[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m[36;1m     | [31;1mprocessing or it's redirected.[0m
+[31;1mSet-PSReadLineOption: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:46[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  46 | [0m     [36;1mSet-PSReadLineOption -PredictionSource HistoryAndPlugin[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mThe predictive suggestion feature cannot be enabled because the console output doesn't support virtual terminal[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m[36;1m     | [31;1mprocessing or it's redirected.[0m
+[31;1mSet-PSReadLineOption: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:47[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  47 | [0m     [36;1mSet-PSReadLineOption -PredictionViewStyle ListView[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1m句柄无效。[0m
+[31;1m&: [0mC:\Users\vyeli\Documents\PowerShell\Microsoft.PowerShell_profile.ps1:61[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  61 | [0m Invoke-Expression (&[36;1mstarship[0m init powershell)[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m                     ~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mThe term 'starship' is not recognized as a name of a cmdlet, function, script file, or executable program. Check[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m[36;1m     | [31;1mthe spelling of the name, or if a path was included, verify that the path is correct and try again.[0m
+```
+</details></tool-use>
+
+_**Agent (gpt-5.5 2026-06-22 01:04:16Z)**_
+
+已输出文档：[docs/production_ready_rhi.md](G:/work/tech/infra/gpu/docs/production_ready_rhi.md)。
+
+里面覆盖了：
+- production-ready RHI 的目标定义
+- 推荐五层架构
+- backend contract、资源生命周期、barrier、render graph、descriptor/layout、command model、swapchain、shader pipeline、debug/profiling、CI、VT/streaming/sparse 的具体改造方案
+- 分阶段实施计划 Phase A 到 Phase F
+- 每个模块的验收标准
+
+这份文档是新增文件，未修改现有文档。
