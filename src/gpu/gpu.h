@@ -5,10 +5,12 @@
 #include "gpu/core/gpu_handle.h"
 #include "gpu/core/gpu_format.h"
 #include "gpu/core/gpu_device.h"
+#include "gpu/core/gpu_backend.h"
 #include "gpu/core/gpu_command.h"
 #include "gpu/core/gpu_render_pass.h"
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_texture.h"
+#include "gpu/core/gpu_sampler.h"
 
 // Platform
 #include "gpu/platform/gpu_platform.h"
@@ -19,6 +21,7 @@
 #include "gpu/capability/gpu_capabilities.h"
 #include "gpu/capability/gpu_feature_info.h"
 #include "gpu/debug/gpu_debug.h"
+#include "gpu/debug/gpu_debug_markers.h"
 
 // Sync
 #include "gpu/sync/gpu_fence.h"
@@ -46,12 +49,14 @@
 #include "gpu/reflection/gpu_type_info.h"
 #include "gpu/layout/gpu_shader_object.h"
 #include "gpu/layout/gpu_parameter_block.h"
+#include "gpu/layout/gpu_pipeline_layout.h"
 
 // Queue (Phase 2)
 #include "gpu/queue/gpu_multi_queue.h"
 
 // Bindless
 #include "gpu/bindless/gpu_bindless_heap.h"
+#include "gpu/bindless/gpu_descriptor_set.h"
 
 // Capability (Phase 3)
 #include "gpu/capability/gpu_feature_gating.h"
@@ -73,3 +78,9 @@
 
 // Render Graph (Phase C)
 #include "gpu/rendergraph/gpu_render_graph.h"
+
+// Descriptor/Layout/Pipeline (Phase D)
+// (gpu_pipeline_layout.h and gpu_descriptor_set.h already included above)
+
+// Backend Conformance (Phase E)
+// (gpu_backend.h and gpu_debug_markers.h already included above)

@@ -11,20 +11,48 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
     if (!desc || !outDevice) return GPU_ERROR_INVALID_ARGS;
 
     rhi::DeviceDesc rhiDesc = {};
-    rhiDesc.deviceType = rhi::DeviceType::Default;
     rhiDesc.enableValidation = desc->enableDebugLayer;
     rhiDesc.slang.targetProfile = "sm_6_0";
 
     rhi::ComPtr<rhi::IDevice> rhiDevice;
-    if (SLANG_FAILED(rhi::getRHI()->createDevice(rhiDesc, rhiDevice.writeRef()))) {
-        rhiDesc.deviceType = rhi::DeviceType::Vulkan;
-        if (SLANG_FAILED(rhi::getRHI()->createDevice(rhiDesc, rhiDevice.writeRef()))) {
-            rhiDesc.deviceType = rhi::DeviceType::D3D12;
-            if (SLANG_FAILED(rhi::getRHI()->createDevice(rhiDesc, rhiDevice.writeRef()))) {
-                return GPU_ERROR_DEVICE_LOST;
-            }
-        }
+
+    auto tryCreate = [&](rhi::DeviceType type) -> bool {
+        rhiDesc.deviceType = type;
+        return SLANG_SUCCEEDED(rhi::getRHI()->createDevice(rhiDesc, rhiDevice.writeRef()));
+    };
+
+    bool created = false;
+    switch (desc->preferredBackend) {
+    case GPU_BACKEND_D3D12:
+        created = tryCreate(rhi::DeviceType::D3D12);
+        break;
+    case GPU_BACKEND_VULKAN:
+        created = tryCreate(rhi::DeviceType::Vulkan);
+        break;
+    case GPU_BACKEND_D3D11:
+        created = tryCreate(rhi::DeviceType::D3D11);
+        break;
+    case GPU_BACKEND_METAL:
+        created = tryCreate(rhi::DeviceType::Metal);
+        break;
+    case GPU_BACKEND_CPU:
+        created = tryCreate(rhi::DeviceType::CPU);
+        break;
+    case GPU_BACKEND_CUDA:
+        created = tryCreate(rhi::DeviceType::CUDA);
+        break;
+    case GPU_BACKEND_WGPU:
+        created = tryCreate(rhi::DeviceType::WGPU);
+        break;
+    case GPU_BACKEND_DEFAULT:
+    default:
+        created = tryCreate(rhi::DeviceType::Default);
+        if (!created) created = tryCreate(rhi::DeviceType::Vulkan);
+        if (!created) created = tryCreate(rhi::DeviceType::D3D12);
+        break;
     }
+
+    if (!created) return GPU_ERROR_DEVICE_LOST;
 
     GpuDevice device = new GpuDevice_t();
     device->rhiDevice = rhiDevice;

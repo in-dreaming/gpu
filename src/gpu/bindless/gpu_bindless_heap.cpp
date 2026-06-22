@@ -1,4 +1,5 @@
 #include "gpu/bindless/gpu_bindless_heap.h"
+#include "gpu/bindless/gpu_descriptor_set.h"
 #include "gpu/bindless/gpu_descriptor_alloc.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/debug/gpu_validation.h"
@@ -83,6 +84,17 @@ uint32_t gpuBindlessAllocate(GpuBindlessHeap heap, GpuHandle resource)
             heap->allocator.free(index);
             return UINT32_MAX;
         }
+    } else if (heap->descriptorType == GPU_DESCRIPTOR_TYPE_SAMPLER) {
+        rhi::ISampler* sampler = heap->device->samplerPool.resolve(resource.index, resource.generation);
+        if (!sampler) {
+            heap->allocator.free(index);
+            return UINT32_MAX;
+        }
+        if (SLANG_FAILED(sampler->getDescriptorHandle(&record.descriptor)) ||
+            !record.descriptor) {
+            heap->allocator.free(index);
+            return UINT32_MAX;
+        }
     } else {
         heap->allocator.free(index);
         return UINT32_MAX;
@@ -129,4 +141,42 @@ uint32_t gpuGetBindlessIndex(GpuDevice device, GpuHandle handle)
     if (!device) return UINT32_MAX;
     (void)device;
     return handle.index;
+}
+
+// ============================================================================
+// Phase D: Extended bindless heap API
+// ============================================================================
+
+void gpuGetBindlessHeapStats(GpuBindlessHeap heap, GpuBindlessHeapStats* outStats)
+{
+    if (!heap || !outStats) return;
+    outStats->allocatedTextures = 0;
+    outStats->allocatedBuffers = 0;
+    outStats->allocatedSamplers = 0;
+    outStats->totalAllocated = 0;
+    outStats->capacity = heap->maxDescriptors;
+
+    for (size_t i = 0; i < heap->records.size(); i++) {
+        if (heap->records[i].occupied) {
+            outStats->totalAllocated++;
+            if (heap->descriptorType == GPU_DESCRIPTOR_TYPE_TEXTURE)
+                outStats->allocatedTextures++;
+            else if (heap->descriptorType == GPU_DESCRIPTOR_TYPE_BUFFER)
+                outStats->allocatedBuffers++;
+            else if (heap->descriptorType == GPU_DESCRIPTOR_TYPE_SAMPLER)
+                outStats->allocatedSamplers++;
+        }
+    }
+}
+
+uint32_t gpuBindlessRegister(GpuBindlessHeap heap, GpuHandle resource, GpuDescriptorType type)
+{
+    if (!heap || !gpuHandleIsValid(resource)) return UINT32_MAX;
+    if (type != heap->descriptorType) return UINT32_MAX;
+    return gpuBindlessAllocate(heap, resource);
+}
+
+void gpuBindlessUnregister(GpuBindlessHeap heap, uint32_t index)
+{
+    gpuBindlessFree(heap, index);
 }

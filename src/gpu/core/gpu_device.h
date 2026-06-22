@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gpu/core/gpu_types.h"
+#include "gpu/core/gpu_backend.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -12,6 +13,7 @@ typedef struct {
     const char* appName;
     uint32_t adapterIndex;
     bool enableDebugLayer;
+    GpuBackend preferredBackend;  // GPU_BACKEND_DEFAULT = auto-select
 } GpuDeviceDesc;
 
 GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice);

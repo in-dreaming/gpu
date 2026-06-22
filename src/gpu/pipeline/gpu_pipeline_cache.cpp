@@ -212,9 +212,63 @@ GpuResult gpuHashPipelineDesc(const GpuPipelineDesc* desc, uint8_t outHash[GPU_S
     return GPU_OK;
 }
 
-// ============================================================================
-// Pipeline Cache Lifecycle
-// ============================================================================
+GpuResult gpuHashPipelineDescWithLayout(const GpuPipelineDesc* desc, uint64_t layoutHash, uint8_t outHash[GPU_SHA256_HASH_SIZE]) {
+    if (!desc || !outHash) {
+        return GPU_ERROR_INVALID_PARAMETER;
+    }
+
+    SHA256_CTX ctx;
+    sha256_init(&ctx);
+
+    // Hash the type first
+    sha256_update(&ctx, (const uint8_t*)&desc->type, sizeof(desc->type));
+
+    // Hash layout hash
+    sha256_update(&ctx, (const uint8_t*)&layoutHash, sizeof(layoutHash));
+
+    // Hash based on pipeline type
+    switch (desc->type) {
+    case GPU_PIPELINE_TYPE_GRAPHICS: {
+        const GpuGraphicsPipelineDesc* gdesc = &desc->graphics;
+        sha256_update(&ctx, (const uint8_t*)gdesc->label, gdesc->label ? strlen(gdesc->label) : 0);
+        sha256_update(&ctx, (const uint8_t*)&gdesc->primitiveTopology, sizeof(gdesc->primitiveTopology));
+        sha256_update(&ctx, (const uint8_t*)&gdesc->polygonMode, sizeof(gdesc->polygonMode));
+        sha256_update(&ctx, (const uint8_t*)&gdesc->cullMode, sizeof(gdesc->cullMode));
+        sha256_update(&ctx, (const uint8_t*)&gdesc->frontFace, sizeof(gdesc->frontFace));
+        sha256_update(&ctx, (const uint8_t*)&gdesc->depthTestEnable, sizeof(gdesc->depthTestEnable));
+        sha256_update(&ctx, (const uint8_t*)&gdesc->depthWriteEnable, sizeof(gdesc->depthWriteEnable));
+        sha256_update(&ctx, (const uint8_t*)&gdesc->depthCompareOp, sizeof(gdesc->depthCompareOp));
+        sha256_update(&ctx, (const uint8_t*)&gdesc->colorTargetCount, sizeof(gdesc->colorTargetCount));
+
+        // Hash color target formats
+        for (uint32_t i = 0; i < gdesc->colorTargetCount && i < 8; i++) {
+            sha256_update(&ctx, (const uint8_t*)&gdesc->colorTargets[i].format, sizeof(GpuFormat));
+        }
+
+        // Hash shader binaries if present
+        if (gdesc->vertexShader.data && gdesc->vertexShader.size > 0) {
+            sha256_update(&ctx, gdesc->vertexShader.data, gdesc->vertexShader.size);
+        }
+        if (gdesc->fragmentShader.data && gdesc->fragmentShader.size > 0) {
+            sha256_update(&ctx, gdesc->fragmentShader.data, gdesc->fragmentShader.size);
+        }
+        break;
+    }
+    case GPU_PIPELINE_TYPE_COMPUTE: {
+        const GpuComputePipelineDesc2* cdesc = &desc->compute;
+        sha256_update(&ctx, (const uint8_t*)cdesc->label, cdesc->label ? strlen(cdesc->label) : 0);
+        if (cdesc->computeShader.data && cdesc->computeShader.size > 0) {
+            sha256_update(&ctx, cdesc->computeShader.data, cdesc->computeShader.size);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    sha256_final(&ctx, outHash);
+    return GPU_OK;
+}
 
 GpuResult gpuCreatePipelineCache(GpuDevice device, const GpuPipelineCacheDesc* desc, GpuPipelineCache* outCache) {
     if (!outCache) {

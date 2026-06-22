@@ -19,6 +19,11 @@ typedef struct {
     uint32_t maxTextureDimension;
     uint32_t maxBindlessDescriptors;
     uint32_t minUniformBufferAlignment;
+    // Phase E: Backend info
+    char apiName[64];
+    char adapterName[128];
+    uint32_t backendType;  // GpuBackend enum value
+    uint64_t timestampFrequency;
 } GpuCapabilities;
 
 void gpuGetCapabilities(GpuDevice device, GpuCapabilities* outCaps);

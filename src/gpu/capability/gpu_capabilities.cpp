@@ -1,5 +1,6 @@
 #include "gpu/capability/gpu_capabilities.h"
 #include "gpu/core/gpu_internal.h"
+#include <cstring>
 
 void gpuGetCapabilities(GpuDevice device, GpuCapabilities* outCaps)
 {
@@ -21,6 +22,26 @@ void gpuGetCapabilities(GpuDevice device, GpuCapabilities* outCaps)
     outCaps->supportSparseResource = false;
 
     outCaps->maxBindlessDescriptors = 1000000;
+
+    // Phase E: Backend info
+    outCaps->backendType = (uint32_t)info.deviceType;
+    outCaps->timestampFrequency = info.timestampFrequency;
+    if (info.apiName) {
+#ifdef _MSC_VER
+        strncpy_s(outCaps->apiName, info.apiName, sizeof(outCaps->apiName) - 1);
+#else
+        strncpy(outCaps->apiName, info.apiName, sizeof(outCaps->apiName) - 1);
+        outCaps->apiName[sizeof(outCaps->apiName) - 1] = '\0';
+#endif
+    }
+    if (info.adapterName) {
+#ifdef _MSC_VER
+        strncpy_s(outCaps->adapterName, info.adapterName, sizeof(outCaps->adapterName) - 1);
+#else
+        strncpy(outCaps->adapterName, info.adapterName, sizeof(outCaps->adapterName) - 1);
+        outCaps->adapterName[sizeof(outCaps->adapterName) - 1] = '\0';
+#endif
+    }
 }
 
 bool gpuIsFeatureSupported(GpuDevice device, uint32_t feature)

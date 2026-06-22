@@ -4,16 +4,19 @@ set(GPU_PUBLIC_HEADERS
     core/gpu_handle.h
     core/gpu_format.h
     core/gpu_device.h
+    core/gpu_backend.h
     core/gpu_command.h
     core/gpu_render_pass.h
     core/gpu_buffer.h
     core/gpu_texture.h
+    core/gpu_sampler.h
     core/gpu_pipeline.h
     platform/gpu_platform.h
     platform/gpu_surface.h
     platform/gpu_swapchain.h
     capability/gpu_capabilities.h
     debug/gpu_debug.h
+    debug/gpu_debug_markers.h
     sync/gpu_fence.h
     resource/gpu_barrier.h
     resource/gpu_resource_manager.h
@@ -32,8 +35,10 @@ set(GPU_PUBLIC_HEADERS
     pipeline/gpu_mesh_pipeline.h
     layout/gpu_shader_object.h
     layout/gpu_parameter_block.h
+    layout/gpu_pipeline_layout.h
     queue/gpu_multi_queue.h
     bindless/gpu_bindless_heap.h
+    bindless/gpu_descriptor_set.h
     # Phase 3 - Capability
     capability/gpu_feature_gating.h
     capability/gpu_feature_info.h
@@ -54,9 +59,11 @@ set(GPU_PUBLIC_HEADERS
 
 set(GPU_SOURCES
     core/gpu_device.cpp
+    core/gpu_backend.cpp
     core/gpu_render_pass.cpp
     core/gpu_buffer.cpp
     core/gpu_texture.cpp
+    core/gpu_sampler.cpp
     core/gpu_pipeline.cpp
     core/gpu_internal.h
     core/gpu_handle_pool.h
@@ -65,6 +72,7 @@ set(GPU_SOURCES
     platform/gpu_swapchain.cpp
     capability/gpu_capabilities.cpp
     debug/gpu_debug.cpp
+    debug/gpu_debug_markers.cpp
     sync/gpu_fence.cpp
     resource/gpu_barrier.cpp
     resource/gpu_resource_manager.cpp
@@ -85,8 +93,10 @@ set(GPU_SOURCES
     pipeline/gpu_mesh_pipeline.cpp
     layout/gpu_parameter_block.cpp
     layout/gpu_shader_object.cpp
+    layout/gpu_pipeline_layout.cpp
     queue/gpu_multi_queue.cpp
     bindless/gpu_bindless_heap.cpp
+    bindless/gpu_descriptor_set.cpp
     bindless/gpu_descriptor_alloc.h
     # Phase 3 - Capability
     capability/gpu_feature_gating.cpp

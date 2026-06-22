@@ -45,6 +45,11 @@ void gpuFreePipelineCacheData(void* data);
 // Returns a 32-byte hash that uniquely identifies the pipeline state
 GpuResult gpuHashPipelineDesc(const GpuPipelineDesc* desc, uint8_t outHash[GPU_SHA256_HASH_SIZE]);
 
+// Compute SHA-256 hash of pipeline description with layout hash for cache key
+// This includes the pipeline layout identity to avoid cache collisions
+// between pipelines with same shader text but different layouts
+GpuResult gpuHashPipelineDescWithLayout(const GpuPipelineDesc* desc, uint64_t layoutHash, uint8_t outHash[GPU_SHA256_HASH_SIZE]);
+
 // Look up a pipeline in the cache by its hash key
 // Returns GPU_ERROR_NOT_FOUND if the pipeline is not in the cache
 GpuResult gpuPipelineCacheLookup(GpuPipelineCache cache, 

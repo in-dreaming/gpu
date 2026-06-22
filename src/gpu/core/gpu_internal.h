@@ -29,6 +29,7 @@ struct GpuDevice_t {
     GpuHandlePool<rhi::IPipeline> pipelinePool;
     GpuHandlePool<rhi::IFence> fencePool;
     GpuHandlePool<rhi::IAccelerationStructure> accelStructPool;
+    GpuHandlePool<rhi::ISampler> samplerPool;
     GpuHandlePool<GpuTensorData> tensorPool;
     GpuResourceState bufferStates[GpuHandlePool<rhi::IBuffer>::capacity()] = {};
     GpuResourceState textureStates[GpuHandlePool<rhi::ITexture>::capacity()] = {};
