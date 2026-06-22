@@ -1,6 +1,7 @@
 #include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_device.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/debug/gpu_validation.h"
 
 static GpuResourceState gpuDefaultTextureState(GpuTextureUsage usage)
 {
@@ -31,7 +32,14 @@ static rhi::ResourceState gpuDefaultTextureRhiState(GpuTextureUsage usage)
 GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuTextureHandle* outHandle)
 {
     if (!device || !desc || !outHandle) return GPU_ERROR_INVALID_ARGS;
-    if (desc->width == 0 || desc->height == 0) return GPU_ERROR_INVALID_ARGS;
+    if (desc->width == 0 || desc->height == 0) {
+        GPU_VALIDATE(device, GPU_VALIDATION_SEVERITY_ERROR, "INVALID_TEXTURE_SIZE",
+                     "Texture width and height must be > 0", desc->label);
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    if ((desc->usage & GPU_TEXTURE_USAGE_SPARSE) != 0) {
+        GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, desc->label);
+    }
 
     rhi::TextureDesc rhiDesc = {};
     rhiDesc.type = gpuTextureTypeToRhi(desc->type);

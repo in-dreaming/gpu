@@ -1,6 +1,7 @@
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_device.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/debug/gpu_validation.h"
 
 static GpuResourceState gpuDefaultBufferState(GpuBufferUsage usage)
 {
@@ -17,7 +18,14 @@ static GpuResourceState gpuDefaultBufferState(GpuBufferUsage usage)
 GpuResult gpuCreateBuffer(GpuDevice device, const GpuBufferDesc* desc, GpuBufferHandle* outHandle)
 {
     if (!device || !desc || !outHandle) return GPU_ERROR_INVALID_ARGS;
-    if (desc->size == 0) return GPU_ERROR_INVALID_ARGS;
+    if (desc->size == 0) {
+        GPU_VALIDATE(device, GPU_VALIDATION_SEVERITY_ERROR, "INVALID_BUFFER_SIZE",
+                     "Buffer size must be > 0", desc->label);
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    if ((desc->usage & GPU_BUFFER_USAGE_SPARSE) != 0) {
+        GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, desc->label);
+    }
 
     rhi::BufferDesc rhiDesc = {};
     rhiDesc.size = desc->size;
@@ -48,7 +56,14 @@ GpuResult gpuCreateBuffer(GpuDevice device, const GpuBufferDesc* desc, GpuBuffer
 GpuResult gpuCreateBufferInit(GpuDevice device, const GpuBufferDesc* desc, const void* initData, GpuBufferHandle* outHandle)
 {
     if (!device || !desc || !initData || !outHandle) return GPU_ERROR_INVALID_ARGS;
-    if (desc->size == 0) return GPU_ERROR_INVALID_ARGS;
+    if (desc->size == 0) {
+        GPU_VALIDATE(device, GPU_VALIDATION_SEVERITY_ERROR, "INVALID_BUFFER_SIZE",
+                     "Buffer size must be > 0", desc->label);
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    if ((desc->usage & GPU_BUFFER_USAGE_SPARSE) != 0) {
+        GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, desc->label);
+    }
 
     rhi::BufferDesc rhiDesc = {};
     rhiDesc.size = desc->size;

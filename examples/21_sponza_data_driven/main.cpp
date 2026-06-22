@@ -902,6 +902,17 @@ int main(int argc, char** argv)
     };
     camera.position = {center.x, center.y + 180.0f, scene.boundsMin.z - 450.0f};
 
+    ComPtr<IShaderObject> rootObject;
+    if (SLANG_FAILED(device->rhiDevice->createRootShaderObject(program->rhiProgram, rootObject.writeRef())) || !rootObject) {
+        printf("Failed to create root shader object\n");
+        return 1;
+    }
+    {
+        ShaderCursor rootCursor(rootObject);
+        rootCursor["baseColorArray"].setBinding(materialTextures.baseColorArrayView);
+        rootCursor["linearSampler"].setBinding(materialTextures.sampler);
+    }
+
     bool keys[256] = {};
     bool rightMouseDown = false;
     bool quit = false;
@@ -970,12 +981,9 @@ int main(int argc, char** argv)
         passDesc.depthStencilAttachment = &depthAttachment;
         auto pass = encoder->beginRenderPass(passDesc);
 
-        auto rootObject = device->rhiDevice->createRootShaderObject(pipeline);
         CameraParams cameraParams = makeCameraParams(camera, (float)surfaceWidth / (float)surfaceHeight);
         ShaderCursor rootCursor(rootObject);
         rootCursor["camera"].setData(cameraParams);
-        rootCursor["baseColorArray"].setBinding(materialTextures.baseColorArrayView);
-        rootCursor["linearSampler"].setBinding(materialTextures.sampler);
         pass->bindPipeline(pipeline, rootObject);
 
         RenderState state = {};

@@ -1,5 +1,6 @@
 #include "gpu/resource/gpu_sparse_resource.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/debug/gpu_validation.h"
 #include <string.h>
 #include <map>
 #include <mutex>
@@ -33,12 +34,22 @@ static std::map<uint64_t, SparseTextureState> s_sparseTextures;
 static std::map<uint64_t, SparseBufferState> s_sparseBuffers;
 static std::mutex s_sparseMutex;
 
-static bool gpuSparseSupported(GpuDevice device)
+static bool gpuSparseNativeSupported(GpuDevice device)
 {
     if (!device) return false;
-    GpuCapabilities caps = {};
-    gpuGetCapabilities(device, &caps);
-    return caps.supportSparseResource;
+    GpuFeatureInfo fi;
+    if (gpuGetFeatureInfo(device, GPU_FEATURE_SPARSE_RESOURCE, &fi) != GPU_SUCCESS)
+        return false;
+    return fi.support == GPU_FEATURE_SUPPORT_NATIVE;
+}
+
+static bool gpuSparseEmulated(GpuDevice device)
+{
+    if (!device) return false;
+    GpuFeatureInfo fi;
+    if (gpuGetFeatureInfo(device, GPU_FEATURE_SPARSE_RESOURCE, &fi) != GPU_SUCCESS)
+        return false;
+    return fi.support == GPU_FEATURE_SUPPORT_EMULATED;
 }
 
 GpuResult gpuGetSparseTextureProperties(GpuDevice device,
@@ -50,7 +61,12 @@ GpuResult gpuGetSparseTextureProperties(GpuDevice device,
                                         GpuSparseTextureProperties* outProps)
 {
     if (!device || !outProps) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseNativeSupported(device)) {
+        GPU_VALIDATE(device, GPU_VALIDATION_SEVERITY_ERROR, "FEATURE_NOT_SUPPORTED",
+                     "Sparse texture properties require native hardware sparse support",
+                     "SparseTextureProps");
+        return GPU_ERROR_NOT_SUPPORTED;
+    }
 
     outProps->tileWidth = 64;
     outProps->tileHeight = 64;
@@ -82,7 +98,7 @@ GpuResult gpuSparseReserve(GpuDevice device,
                             const GpuSparseTileCoord* tiles)
 {
     if (!device || !gpuHandleIsValid(texture) || !tiles || tileCount == 0) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "SparseReserve"); }
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     uint64_t key = ((uint64_t)texture.index << 32) | texture.generation;
@@ -122,7 +138,7 @@ GpuResult gpuSparseRelease(GpuDevice device,
                             const GpuSparseTileCoord* tiles)
 {
     if (!device || !gpuHandleIsValid(texture) || !tiles || tileCount == 0) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "SparseRelease"); }
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     uint64_t key = ((uint64_t)texture.index << 32) | texture.generation;
@@ -145,14 +161,13 @@ GpuResult gpuSparseMap(GpuDevice device,
                        uint64_t offset)
 {
     if (!device || !gpuHandleIsValid(texture) || !tile) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "SparseMap"); }
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     uint64_t key = ((uint64_t)texture.index << 32) | texture.generation;
     auto& state = s_sparseTextures[key];
 
     state.mappedTiles++;
-    state.residentTiles++;
     uint64_t tileSizeBytes = 64 * 64 * 4;
     state.residentMemoryBytes += tileSizeBytes;
 
@@ -181,7 +196,7 @@ GpuResult gpuSparseUnmap(GpuDevice device,
                           const GpuSparseTileCoord* tile)
 {
     if (!device || !gpuHandleIsValid(texture) || !tile) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "SparseUnmap"); }
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     sparseUnmapLocked(device, texture, tile);
@@ -196,7 +211,7 @@ GpuResult gpuSparseMapMultiple(GpuDevice device,
                                 const uint64_t* offsets)
 {
     if (!device || !gpuHandleIsValid(texture) || !tiles || !offsets) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "SparseMapMultiple"); }
 
     GpuResult result = GPU_SUCCESS;
     for (uint32_t i = 0; i < tileCount; i++) {
@@ -212,7 +227,12 @@ GpuResult gpuGetSparseBufferProperties(GpuDevice device,
                                         uint32_t* outPageCount)
 {
     if (!device) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseNativeSupported(device)) {
+        GPU_VALIDATE(device, GPU_VALIDATION_SEVERITY_ERROR, "FEATURE_NOT_SUPPORTED",
+                     "Sparse buffer properties require native hardware sparse support",
+                     "SparseBufferProps");
+        return GPU_ERROR_NOT_SUPPORTED;
+    }
 
     uint32_t pageSize = 65536;
     uint32_t pageCount = (uint32_t)((size + pageSize - 1) / pageSize);
@@ -229,7 +249,7 @@ GpuResult gpuCreateSparseBuffer(GpuDevice device,
                                   GpuBufferHandle* outBuffer)
 {
     if (!device || !outBuffer || size == 0) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "CreateSparseBuffer"); }
 
     GpuBufferDesc desc = {};
     desc.size = size;
@@ -256,7 +276,7 @@ GpuResult gpuSparseBufferMap(GpuDevice device,
                                uint64_t /*offset*/)
 {
     if (!device || !gpuHandleIsValid(sparseBuffer) || !gpuHandleIsValid(backingMemory)) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "SparseBufferMap"); }
 
     rhi::IBuffer* dstBuf = device->bufferPool.resolve(sparseBuffer.index, sparseBuffer.generation);
     rhi::IBuffer* srcBuf = device->bufferPool.resolve(backingMemory.index, backingMemory.generation);
@@ -278,7 +298,7 @@ GpuResult gpuSparseBufferUnmap(GpuDevice device,
                                  uint64_t /*pageIndex*/)
 {
     if (!device || !gpuHandleIsValid(sparseBuffer)) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "SparseBufferUnmap"); }
 
     std::lock_guard<std::mutex> lock(s_sparseMutex);
     uint64_t key = ((uint64_t)sparseBuffer.index << 32) | sparseBuffer.generation;
@@ -331,7 +351,7 @@ GpuResult gpuSparseGetTextureStats(GpuDevice device,
                                      GpuSparseTextureStats* outStats)
 {
     if (!device || !gpuHandleIsValid(texture) || !outStats) return GPU_ERROR_INVALID_ARGS;
-    if (!gpuSparseSupported(device)) return GPU_ERROR_NOT_SUPPORTED;
+    if (!gpuSparseEmulated(device)) { GPU_FEATURE_GATE(device, GPU_FEATURE_SPARSE_RESOURCE, "SparseTextureStats"); }
 
     memset(outStats, 0, sizeof(GpuSparseTextureStats));
 

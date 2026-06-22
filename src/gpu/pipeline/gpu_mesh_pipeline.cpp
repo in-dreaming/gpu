@@ -1,6 +1,7 @@
 #include "gpu/pipeline/gpu_mesh_pipeline.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/shader/gpu_shader_compiler.h"
+#include "gpu/debug/gpu_validation.h"
 #include <slang.h>
 #include <string.h>
 #include <stdio.h>
@@ -32,11 +33,19 @@ static bool writeShaderToTempFile(const char* content, const char* suffix, std::
 
 GpuResult gpuCreateMeshPipeline(GpuDevice device, const GpuMeshPipelineDesc* desc, GpuPipelineHandle* outPipeline) {
     if (!device || !desc || !outPipeline) return GPU_ERROR_INVALID_ARGS;
-    if (!desc->meshShader.data || desc->meshShader.size == 0) return GPU_ERROR_INVALID_ARGS;
-    if (!desc->fragmentShader.data || desc->fragmentShader.size == 0) return GPU_ERROR_INVALID_ARGS;
+    if (!desc->meshShader.data || desc->meshShader.size == 0) {
+        GPU_VALIDATE(device, GPU_VALIDATION_SEVERITY_ERROR, "MISSING_MESH_SHADER",
+                     "Mesh shader binary is required", desc ? desc->label : NULL);
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    if (!desc->fragmentShader.data || desc->fragmentShader.size == 0) {
+        GPU_VALIDATE(device, GPU_VALIDATION_SEVERITY_ERROR, "MISSING_FRAGMENT_SHADER",
+                     "Fragment shader binary is required", desc ? desc->label : NULL);
+        return GPU_ERROR_INVALID_ARGS;
+    }
 
     if (!device->rhiDevice->hasFeature(rhi::Feature::MeshShader)) {
-        return GPU_ERROR_NOT_SUPPORTED;
+        GPU_FEATURE_GATE(device, GPU_FEATURE_MESH_SHADER, desc->label);
     }
 
     rhi::ComPtr<slang::ISession> slangSession;

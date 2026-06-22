@@ -2,6 +2,7 @@
 #include "gpu/core/gpu_internal.h"
 #include "gpu/shader/gpu_shader_compiler.h"
 #include "gpu/pipeline/gpu_pipeline_state.h"
+#include "gpu/debug/gpu_validation.h"
 #include <slang-rhi.h>
 #include <string.h>
 #include <stdlib.h>
@@ -51,6 +52,12 @@ static bool writeWorkGraphShaderToTempFile(const char* content, const char* suff
 GpuResult gpuCreateWorkGraph(GpuDevice device, const GpuWorkGraphDesc* desc, GpuWorkGraph* outGraph)
 {
     if (!device || !desc || !outGraph) return GPU_ERROR_INVALID_ARGS;
+
+    GpuFeatureInfo fi;
+    if (gpuGetFeatureInfo(device, GPU_FEATURE_WORK_GRAPH, &fi) != GPU_SUCCESS ||
+        fi.support == GPU_FEATURE_SUPPORT_UNSUPPORTED) {
+        GPU_FEATURE_GATE(device, GPU_FEATURE_WORK_GRAPH, "WorkGraph");
+    }
 
     std::lock_guard<std::mutex> lock(s_graphMutex);
 

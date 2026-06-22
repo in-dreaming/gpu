@@ -1,6 +1,7 @@
 #include "gpu/bindless/gpu_bindless_heap.h"
 #include "gpu/bindless/gpu_descriptor_alloc.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/debug/gpu_validation.h"
 #include <vector>
 
 struct GpuBindlessRecord {
@@ -21,6 +22,8 @@ struct GpuBindlessHeap_t {
 GpuResult gpuCreateBindlessHeap(GpuDevice device, const GpuBindlessHeapDesc* desc, GpuBindlessHeap* outHeap)
 {
     if (!device || !desc || !outHeap) return GPU_ERROR_INVALID_ARGS;
+
+    GPU_FEATURE_GATE(device, GPU_FEATURE_BINDLESS, "BindlessHeap");
 
     GpuBindlessHeap heap = new GpuBindlessHeap_t();
     heap->device = device;

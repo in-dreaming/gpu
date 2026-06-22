@@ -17,6 +17,7 @@
 
 // Capabilities & Debug
 #include "gpu/capability/gpu_capabilities.h"
+#include "gpu/capability/gpu_feature_info.h"
 #include "gpu/debug/gpu_debug.h"
 
 // Sync

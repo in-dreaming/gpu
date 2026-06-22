@@ -3,6 +3,7 @@
 #include "gpu/core/gpu_internal.h"
 #include "gpu/shader/gpu_shader_compiler.h"
 #include "gpu/pipeline/gpu_pipeline_state.h"
+#include "gpu/debug/gpu_validation.h"
 #include <slang-rhi.h>
 #include <string.h>
 #include <stdio.h>
@@ -39,7 +40,7 @@ GpuResult gpuCreateBottomLevelAS(GpuDevice device, const GpuBottomLevelASDesc* d
     if (!desc->geometryCount || !desc->geometries) return GPU_ERROR_INVALID_ARGS;
 
     if (!device->rhiDevice->hasFeature(rhi::Feature::AccelerationStructure)) {
-        return GPU_ERROR_NOT_SUPPORTED;
+        GPU_FEATURE_GATE(device, GPU_FEATURE_RAY_TRACING, "BLAS");
     }
 
     std::vector<rhi::AccelerationStructureBuildInput> buildInputs;
@@ -104,7 +105,7 @@ GpuResult gpuCreateTopLevelAS(GpuDevice device, const GpuTopLevelASDesc* desc, G
     if (!device || !desc || !outAS) return GPU_ERROR_INVALID_ARGS;
 
     if (!device->rhiDevice->hasFeature(rhi::Feature::AccelerationStructure)) {
-        return GPU_ERROR_NOT_SUPPORTED;
+        GPU_FEATURE_GATE(device, GPU_FEATURE_RAY_TRACING, "TLAS");
     }
 
     rhi::IBuffer* instanceBuffer = nullptr;
@@ -221,7 +222,7 @@ GpuResult gpuCreateRayTracingPipeline(GpuDevice device, const GpuRayTracingPipel
     if (!device || !desc || !outPipeline) return GPU_ERROR_INVALID_ARGS;
 
     if (!device->rhiDevice->hasFeature(rhi::Feature::RayTracing)) {
-        return GPU_ERROR_NOT_SUPPORTED;
+        GPU_FEATURE_GATE(device, GPU_FEATURE_RAY_TRACING, desc->label);
     }
 
     rhi::ComPtr<slang::ISession> slangSession;
