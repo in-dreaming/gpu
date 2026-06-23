@@ -76,7 +76,8 @@ bool initRenderResources(RenderResources& r, uint32_t w, uint32_t h, uint32_t ma
         td.usage = GPU_TEXTURE_USAGE_UNORDERED_ACCESS | GPU_TEXTURE_USAGE_SHADER_RESOURCE;
         td.label = "ssgi_output";
         if (gpuCreateTexture(r.device, &td, &r.ssgiOutput) != GPU_SUCCESS) return false;
-        gpuCreateTextureView(r.device, r.ssgiOutput, GPU_TEXTURE_VIEW_TYPE_UNORDERED_ACCESS, &r.ssgiOutputView);
+        gpuCreateTextureView(r.device, r.ssgiOutput, GPU_TEXTURE_VIEW_TYPE_UNORDERED_ACCESS, &r.ssgiOutputUav);
+        gpuCreateTextureView(r.device, r.ssgiOutput, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &r.ssgiOutputSrv);
     }
 
     // SSGI prev frame (for temporal)
@@ -114,8 +115,12 @@ void recreateDepth(RenderResources& r, uint32_t w, uint32_t h) {
     r.surfaceWidth = w;
     r.surfaceHeight = h;
     if (r.sceneDepth.index) {
-        if (r.sceneDepthView.index) gpuDestroyTextureView(r.device, r.sceneDepthView);
+        if (r.sceneDepthSrv.index) gpuDestroyTextureView(r.device, r.sceneDepthSrv);
+        if (r.sceneDepthDsv.index) gpuDestroyTextureView(r.device, r.sceneDepthDsv);
         gpuDestroyTexture(r.device, r.sceneDepth);
+        r.sceneDepth = GPU_NULL_HANDLE;
+        r.sceneDepthDsv = GPU_NULL_HANDLE;
+        r.sceneDepthSrv = GPU_NULL_HANDLE;
     }
     GpuTextureDesc td = {};
     td.type = GPU_TEXTURE_TYPE_2D;
@@ -123,16 +128,18 @@ void recreateDepth(RenderResources& r, uint32_t w, uint32_t h) {
     td.arrayLength = 1; td.mipCount = 1;
     td.format = GPU_FORMAT_D32_FLOAT;
     td.sampleCount = 1;
-    td.usage = GPU_TEXTURE_USAGE_DEPTH_STENCIL;
+    td.usage = GPU_TEXTURE_USAGE_DEPTH_STENCIL | GPU_TEXTURE_USAGE_SHADER_RESOURCE;
     td.label = "scene_depth";
     if (gpuCreateTexture(r.device, &td, &r.sceneDepth) == GPU_SUCCESS) {
-        gpuCreateTextureView(r.device, r.sceneDepth, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &r.sceneDepthView);
+        gpuCreateTextureView(r.device, r.sceneDepth, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &r.sceneDepthDsv);
+        gpuCreateTextureView(r.device, r.sceneDepth, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &r.sceneDepthSrv);
     }
 }
 
 void destroyRenderResources(RenderResources& r) {
     auto destroy = [&](auto& h, auto fn) { if (h.index) { fn(r.device, h); h = GPU_NULL_HANDLE; } };
-    destroy(r.sceneDepthView, gpuDestroyTextureView);
+    destroy(r.sceneDepthSrv, gpuDestroyTextureView);
+    destroy(r.sceneDepthDsv, gpuDestroyTextureView);
     destroy(r.sceneDepth, gpuDestroyTexture);
     destroy(r.vertexBuffer, gpuDestroyBuffer);
     destroy(r.indexBuffer, gpuDestroyBuffer);
@@ -140,7 +147,8 @@ void destroyRenderResources(RenderResources& r) {
     destroy(r.cameraBuffer, gpuDestroyBuffer);
     destroy(r.lightIndexBuffer, gpuDestroyBuffer);
 
-    destroy(r.ssgiOutputView, gpuDestroyTextureView);
+    destroy(r.ssgiOutputUav, gpuDestroyTextureView);
+    destroy(r.ssgiOutputSrv, gpuDestroyTextureView);
     destroy(r.ssgiOutput, gpuDestroyTexture);
     destroy(r.ssgiPrevView, gpuDestroyTextureView);
     destroy(r.ssgiPrev, gpuDestroyTexture);

@@ -1,4 +1,5 @@
 #include "material_textures.h"
+#include "gpu/core/gpu_internal.h"
 
 #ifdef _MSC_VER
 #pragma warning(push, 0)
@@ -8,6 +9,8 @@
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
+
+#include <slang-rhi.h>
 
 #include <cstdio>
 #include <cstring>
@@ -96,20 +99,58 @@ bool createSponzaMaterialTextures(GpuDevice device, const char* root, SponzaScen
         loaded++;
     }
 
-    GpuBufferDesc bd = {};
-    bd.size = (uint64_t)lc * ls * ls * 4;
-    bd.usage = GPU_BUFFER_USAGE_COPY_DEST | GPU_BUFFER_USAGE_SHADER_RESOURCE;
-    bd.label = "tex_upload";
+    // Create sampler for the texture array
+    rhi::SamplerDesc sd = {};
+    sd.minFilter = rhi::TextureFilteringMode::Linear;
+    sd.magFilter = rhi::TextureFilteringMode::Linear;
+    sd.mipFilter = rhi::TextureFilteringMode::Linear;
+    sd.addressU = rhi::TextureAddressingMode::Wrap;
+    sd.addressV = rhi::TextureAddressingMode::Wrap;
+    sd.addressW = rhi::TextureAddressingMode::ClampToEdge;
+    sd.label = "sponza_sampler";
+    rhi::ComPtr<rhi::ISampler> sampler;
+    device->rhiDevice->createSampler(sd, sampler.writeRef());
 
+    // Create texture array with initial data via RHI (C API doesn't support initial data)
+    rhi::TextureDesc rhiTd = {};
+    rhiTd.type = rhi::TextureType::Texture2DArray;
+    rhiTd.size = {(uint32_t)ls, (uint32_t)ls, 1u};
+    rhiTd.arrayLength = lc;
+    rhiTd.mipCount = 1;
+    rhiTd.format = rhi::Format::RGBA8UnormSrgb;
+    rhiTd.usage = rhi::TextureUsage::ShaderResource;
+    rhiTd.defaultState = rhi::ResourceState::ShaderResource;
+    rhiTd.sampler = sampler;
+    rhiTd.label = "sponza_texarray";
+
+    std::vector<rhi::SubresourceData> subs(lc);
+    size_t lbs = (size_t)ls * ls * 4;
+    for (uint32_t i = 0; i < lc; ++i) {
+        subs[i] = {px.data() + (size_t)i * lbs, (size_t)(ls * 4), lbs};
+    }
+
+    rhi::ComPtr<rhi::ITexture> rhiTex;
+    if (SLANG_FAILED(device->rhiDevice->createTexture(rhiTd, subs.data(), rhiTex.writeRef())) || !rhiTex) {
+        printf("Texture alloc failed\n");
+        return false;
+    }
+
+    // Register the RHI texture in the C API handle pool
     GpuTextureDesc td = {};
     td.type = GPU_TEXTURE_TYPE_2D;
     td.width = ls; td.height = ls; td.depth = 1;
     td.arrayLength = lc; td.mipCount = 1;
     td.format = GPU_FORMAT_RGBA8_UNORM_SRGB;
-    td.usage = GPU_TEXTURE_USAGE_SHADER_RESOURCE | GPU_TEXTURE_USAGE_COPY_DEST;
+    td.usage = GPU_TEXTURE_USAGE_SHADER_RESOURCE;
     td.label = "sponza_texarray";
-
-    if (gpuCreateTexture(device, &td, &out.baseColorArray) != GPU_SUCCESS) { printf("Texture alloc failed\n"); return false; }
+    if (gpuCreateTexture(device, &td, &out.baseColorArray) != GPU_SUCCESS) {
+        printf("Texture handle alloc failed\n");
+        return false;
+    }
+    // Replace the dummy RHI texture with our data-filled one
+    rhi::ITexture* dummy = device->texturePool.resolve(out.baseColorArray.index, out.baseColorArray.generation);
+    if (dummy) dummy->release();
+    device->texturePool.slots[out.baseColorArray.index].ptr = rhiTex.detach();
 
     gpuCreateTextureView(device, out.baseColorArray, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &out.baseColorView);
 

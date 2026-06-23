@@ -118,6 +118,10 @@ bool createDemoPipelines(GpuDevice device, DemoPipelines& p, GpuFormat surfaceFo
             printf("SSGI shader failed: %s\n", gpuGetShaderCompileDiagnostic(p.compiler));
             return false;
         }
+        // Create root shader object for SSGI
+        if (SLANG_FAILED(rhiDevice->createRootShaderObject(p.ssgiProgram->rhiProgram, p.ssgiRootObj.writeRef()))) {
+            printf("SSGI root object failed\n"); return false;
+        }
         ComputePipelineDesc cpd = {};
         cpd.program = p.ssgiProgram->rhiProgram;
         cpd.label = "ssgi_pipeline";
@@ -156,6 +160,7 @@ void destroyDemoPipelines(GpuDevice device, DemoPipelines& p) {
     p.lightCullPipeline.setNull();
     p.shadowRootObj.setNull();
     p.forwardRootObj.setNull();
+    p.ssgiRootObj.setNull();
     p.inputLayout.setNull();
     if (p.shadowProgram) { gpuDestroyShaderProgram(p.shadowProgram); p.shadowProgram = nullptr; }
     if (p.forwardProgram) { gpuDestroyShaderProgram(p.forwardProgram); p.forwardProgram = nullptr; }

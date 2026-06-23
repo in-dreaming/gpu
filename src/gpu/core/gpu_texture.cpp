@@ -124,9 +124,9 @@ GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTe
     rhi::TextureViewDesc viewDesc = {};
     viewDesc.format = tex->getDesc().format;
     viewDesc.subresourceRange.mip = 0;
-    viewDesc.subresourceRange.mipCount = 1;
+    viewDesc.subresourceRange.mipCount = tex->getDesc().mipCount;
     viewDesc.subresourceRange.layer = 0;
-    viewDesc.subresourceRange.layerCount = 1;
+    viewDesc.subresourceRange.layerCount = tex->getDesc().arrayLength;
 
     // Set aspect based on view type
     if (type == GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL) {

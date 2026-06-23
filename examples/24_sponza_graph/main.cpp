@@ -114,6 +114,31 @@ static const char* resolveSponzaRoot(const char* explicitRoot, const char* argv0
 // Per-frame data shared between render graph callbacks
 // ============================================================================
 
+// Matrix utility: build a 4x4 view matrix from camera basis
+static void buildViewMatrix(const CameraParams& cam, float* out) {
+    memset(out, 0, sizeof(float) * 16);
+    // Rotation: right, up, -forward as rows
+    out[0] = cam.right[0]; out[1] = cam.right[1]; out[2] = cam.right[2];
+    out[4] = cam.up[0];    out[5] = cam.up[1];    out[6] = cam.up[2];
+    out[8] = -cam.forward[0]; out[9] = -cam.forward[1]; out[10] = -cam.forward[2];
+    // Translation: -dot(right, pos), -dot(up, pos), dot(forward, pos)
+    float tx = cam.right[0]*cam.cameraPos[0] + cam.right[1]*cam.cameraPos[1] + cam.right[2]*cam.cameraPos[2];
+    float ty = cam.up[0]*cam.cameraPos[0] + cam.up[1]*cam.cameraPos[1] + cam.up[2]*cam.cameraPos[2];
+    float tz = cam.forward[0]*cam.cameraPos[0] + cam.forward[1]*cam.cameraPos[1] + cam.forward[2]*cam.cameraPos[2];
+    out[3] = -tx; out[7] = -ty; out[11] = tz;
+    out[15] = 1.0f;
+}
+
+// Build a 4x4 projection matrix from CameraParams (custom reversed-z style)
+static void buildProjMatrix(const CameraParams& cam, float* out) {
+    memset(out, 0, sizeof(float) * 16);
+    float fx = cam.proj[0], fy = cam.proj[1];
+    float n = cam.zParams[0], f = cam.zParams[1];
+    out[0] = fx;  out[5] = fy;  out[10] = f / (f - n);  out[11] = 1.0f;
+    out[14] = (-f * n) / (f - n);
+    // W = vz; Z = vz * f/(f-n) - f*n/(f-n); homogenous division gives: Z_clip = (f/(f-n)) - (f*n/(f-n))/vz
+}
+
 struct FrameData {
     GpuDevice device;
     SponzaScene* scene;
@@ -508,13 +533,15 @@ static void setCommonRenderState(GpuGraphPassContext* ctx, FrameData* d) {
 
 static void shadowPassCallback(GpuGraphPassContext* ctx, void* userData) {
     FrameData* d = (FrameData*)userData;
-    if (!ctx->renderPass || !d->pipelines->shadowPipeline) return;
+    if (!ctx->renderPass || !d->pipelines->shadowPipeline || !d->pipelines->shadowRootObj) return;
 
     rhi::IRenderPassEncoder* rpEnc = ctx->renderPass->rhiPassEncoder;
 
-    // Set cascade data into shadow root shader object
+    // Set cascade cameras into shadow root shader object
     {
         ShaderCursor c(d->pipelines->shadowRootObj);
+        // shadow.slang declares: CascadeUniforms cascadeData;
+        // CascadeUniforms has: ShadowCameraParams cascades[4];
         for (int ci = 0; ci < 4; ci++) {
             c["cascadeData"]["cascades"][ci].setData(d->shadowCameras[ci]);
         }
@@ -536,7 +563,7 @@ static void shadowPassCallback(GpuGraphPassContext* ctx, void* userData) {
     for (const auto& draw : d->scene->draws) {
         DrawArguments a = {};
         a.vertexCount = draw.indexCount;
-        a.instanceCount = 4; // 4 cascades drawn in one call via instancing
+        a.instanceCount = 4; // 4 cascades via instancing
         a.startIndexLocation = draw.firstIndex;
         rpEnc->drawIndexed(a);
     }
@@ -544,7 +571,7 @@ static void shadowPassCallback(GpuGraphPassContext* ctx, void* userData) {
 
 static void forwardPassCallback(GpuGraphPassContext* ctx, void* userData) {
     FrameData* d = (FrameData*)userData;
-    if (!ctx->renderPass || !d->pipelines->forwardPipeline) return;
+    if (!ctx->renderPass || !d->pipelines->forwardPipeline || !d->pipelines->forwardRootObj) return;
 
     rhi::IRenderPassEncoder* rpEnc = ctx->renderPass->rhiPassEncoder;
 
@@ -560,28 +587,58 @@ static void forwardPassCallback(GpuGraphPassContext* ctx, void* userData) {
         c["screenWidth"].setData(d->surfaceWidth);
         c["screenHeight"].setData(d->surfaceHeight);
 
-        // Bind cascade shadow maps
+        // Bind base color texture array + linear sampler (CRITICAL: without these albedo=black)
+        auto* baseColorView = d->device->textureViewPool.resolve(
+            d->materials->baseColorView.index,
+            d->materials->baseColorView.generation);
+        if (baseColorView) c["baseColorArray"].setBinding(baseColorView);
+        auto* linSamp = d->device->samplerPool.resolve(
+            d->resources->linearSampler.index,
+            d->resources->linearSampler.generation);
+        if (linSamp) c["linearSampler"].setBinding(linSamp);
+
+        // Bind shadow comparison sampler
+        auto* shdSamp = d->device->samplerPool.resolve(
+            d->resources->shadowSampler.index,
+            d->resources->shadowSampler.generation);
+        if (shdSamp) c["shadowSampler"].setBinding(shdSamp);
+
+        // Bind cascade shadow maps, matrices, and cascade data
         for (int ci = 0; ci < 4; ci++) {
-            char buf[32];
-            snprintf(buf, sizeof(buf), "shadowMaps[%d]", ci);
-            // Resolve cascade SRV
-            auto* srv = d->device->textureViewPool.resolve(d->resources->cascadeSRV[ci].index, d->resources->cascadeSRV[ci].generation);
+            auto* srv = d->device->textureViewPool.resolve(
+                d->resources->cascadeSRV[ci].index,
+                d->resources->cascadeSRV[ci].generation);
             if (srv) c["shadowMaps"][ci].setBinding(srv);
+
+            // Compute view-projection matrix for this cascade
+            float viewMat[16], projMat[16];
+            buildViewMatrix(d->shadowCameras[ci], viewMat);
+            buildProjMatrix(d->shadowCameras[ci], projMat);
+            float result[16] = {};
+            for (int r = 0; r < 4; r++)
+                for (int c2 = 0; c2 < 4; c2++)
+                    for (int k = 0; k < 4; k++)
+                        result[r * 4 + c2] += projMat[r * 4 + k] * viewMat[k * 4 + c2];
+            c["cascadeViewProj"][ci].setData(result);
+
+            // Set cascade data (texelSize etc.)
+            ShadowCascadeData cd = {};
+            cd.splitDepth = 0.0f;
+            cd.texelSize = 1.0f / (float)kShadowMapSize;
+            c["cascades"][ci].setData(cd);
         }
 
-        // Bind cascade view-projection matrices
-        for (int ci = 0; ci < 4; ci++) {
-            float viewProj[16] = {};
-            viewProj[0] = 1.0f; viewProj[5] = 1.0f; viewProj[10] = 1.0f; viewProj[15] = 1.0f;
-            c["cascadeViewProj"][ci].setData(viewProj);
-        }
-
-        // Bind SSGI output
-        auto* ssgiView = d->device->textureViewPool.resolve(d->resources->ssgiOutputView.index, d->resources->ssgiOutputView.generation);
-        if (ssgiView) c["ssgiTexture"].setBinding(ssgiView);
+        // Bind SSGI output + sampler
+        auto* ssgiSrv = d->device->textureViewPool.resolve(
+            d->resources->ssgiOutputSrv.index,
+            d->resources->ssgiOutputSrv.generation);
+        if (ssgiSrv) c["ssgiTexture"].setBinding(ssgiSrv);
+        if (linSamp) c["ssgiSampler"].setBinding(linSamp);
 
         // Bind light buffer as structured buffer
-        auto* lightBuf = d->device->bufferPool.resolve(d->resources->lightBuffer.index, d->resources->lightBuffer.generation);
+        auto* lightBuf = d->device->bufferPool.resolve(
+            d->resources->lightBuffer.index,
+            d->resources->lightBuffer.generation);
         if (lightBuf) c["pointLights"].setBinding(lightBuf);
     }
 
@@ -599,11 +656,83 @@ static void forwardPassCallback(GpuGraphPassContext* ctx, void* userData) {
 
 static void ssgiPassCallback(GpuGraphPassContext* ctx, void* userData) {
     FrameData* d = (FrameData*)userData;
-    if (!ctx->computePass || !d->pipelines->ssgiPipeline) return;
-    // SSGI compute — dispatched via RHI directly
+    if (!ctx->computePass || !d->pipelines->ssgiPipeline || !d->pipelines->ssgiRootObj) return;
     auto* cpEnc = reinterpret_cast<IComputePassEncoder*>(ctx->computePass);
-    cpEnc->bindPipeline(d->pipelines->ssgiPipeline);
-    cpEnc->dispatchCompute((d->surfaceWidth + 7) / 8, (d->surfaceHeight + 7) / 8, 1);
+
+    // Bind SSGI shader parameters
+    {
+        ShaderCursor c(d->pipelines->ssgiRootObj);
+        c["camera"].setData(d->cameraParams);
+
+        // Build SSGIParams
+        SSGIParams sp = {};
+        float viewMatrix[16], invViewMatrix[16], projMatrix[16], invProjMatrix[16];
+        buildViewMatrix(d->cameraParams, viewMatrix);
+        buildProjMatrix(d->cameraParams, projMatrix);
+        // Inverse view = rotation^T + translation
+        {
+            float tx = d->cameraParams.cameraPos[0];
+            float ty = d->cameraParams.cameraPos[1];
+            float tz = d->cameraParams.cameraPos[2];
+            memset(invViewMatrix, 0, sizeof(float) * 16);
+            invViewMatrix[0] = d->cameraParams.right[0];
+            invViewMatrix[1] = d->cameraParams.up[0];
+            invViewMatrix[2] = -d->cameraParams.forward[0];
+            invViewMatrix[4] = d->cameraParams.right[1];
+            invViewMatrix[5] = d->cameraParams.up[1];
+            invViewMatrix[6] = -d->cameraParams.forward[1];
+            invViewMatrix[8] = d->cameraParams.right[2];
+            invViewMatrix[9] = d->cameraParams.up[2];
+            invViewMatrix[10] = -d->cameraParams.forward[2];
+            invViewMatrix[3] = -(invViewMatrix[0]*tx + invViewMatrix[4]*ty + invViewMatrix[8]*tz);
+            invViewMatrix[7] = -(invViewMatrix[1]*tx + invViewMatrix[5]*ty + invViewMatrix[9]*tz);
+            invViewMatrix[11] = -(invViewMatrix[2]*tx + invViewMatrix[6]*ty + invViewMatrix[10]*tz);
+            invViewMatrix[15] = 1.0f;
+        }
+        // Inverse proj for custom projection
+        {
+            float fx = d->cameraParams.proj[0], fy = d->cameraParams.proj[1];
+            float n = d->cameraParams.zParams[0], f = d->cameraParams.zParams[1];
+            memset(invProjMatrix, 0, sizeof(float) * 16);
+            invProjMatrix[0] = 1.0f / fx;
+            invProjMatrix[5] = 1.0f / fy;
+            invProjMatrix[11] = -(f - n) / (f * n);
+            invProjMatrix[14] = 1.0f;
+            invProjMatrix[15] = f * n / (f - n);
+        }
+        memcpy(sp.projMatrix, projMatrix, sizeof(float) * 16);
+        memcpy(sp.invProjMatrix, invProjMatrix, sizeof(float) * 16);
+        memcpy(sp.viewMatrix, viewMatrix, sizeof(float) * 16);
+        memcpy(sp.invViewMatrix, invViewMatrix, sizeof(float) * 16);
+        sp.cameraPos[0] = d->cameraParams.cameraPos[0];
+        sp.cameraPos[1] = d->cameraParams.cameraPos[1];
+        sp.cameraPos[2] = d->cameraParams.cameraPos[2];
+        sp.stepSize = 0.5f;
+        sp.maxDistance = 50.0f;
+        sp.screenWidth = d->surfaceWidth / 2;
+        sp.screenHeight = d->surfaceHeight / 2;
+        sp.temporalFrame = d->frameIndex;
+        c["ssgiParams"].setData(sp);
+
+        // Bind depth SRV (view, not raw texture)
+        auto* depthSrv = d->device->textureViewPool.resolve(
+            d->resources->sceneDepthSrv.index,
+            d->resources->sceneDepthSrv.generation);
+        if (depthSrv) c["depthTexture"].setBinding(depthSrv);
+
+        auto* samp = d->device->samplerPool.resolve(
+            d->resources->linearSampler.index,
+            d->resources->linearSampler.generation);
+        if (samp) c["depthSampler"].setBinding(samp);
+
+        // Bind SSGI output as UAV view
+        auto* outUav = d->device->textureViewPool.resolve(
+            d->resources->ssgiOutputUav.index,
+            d->resources->ssgiOutputUav.generation);
+        if (outUav) c["outputTexture"].setBinding(outUav);
+    }
+    cpEnc->bindPipeline(d->pipelines->ssgiPipeline, d->pipelines->ssgiRootObj);
+    cpEnc->dispatchCompute((d->surfaceWidth + 15) / 16, (d->surfaceHeight + 15) / 16, 1);
 }
 
 static void lightCullPassCallback(GpuGraphPassContext* ctx, void* userData) {

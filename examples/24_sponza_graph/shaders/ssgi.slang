@@ -34,8 +34,6 @@ CameraParams camera;
 SSGIParams ssgiParams;
 Texture2D<float> depthTexture;
 SamplerState depthSampler;
-Texture2D<float4> colorTexture;
-SamplerState colorSampler;
 RWTexture2D<float4> outputTexture;
 
 float3 getWorldPos(float2 uv, float depth)
@@ -113,7 +111,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 
         if (distToSample < ssgiParams.stepSize * 2.0)
         {
-            indirect += colorTexture.SampleLevel(colorSampler, sampleUV.xy, 0).rgb * 0.1;
+            indirect += float3(0.02, 0.03, 0.05); // simple ambient contribution
             sampleCount++;
         }
     }

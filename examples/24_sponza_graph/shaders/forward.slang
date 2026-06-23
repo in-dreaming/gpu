@@ -164,7 +164,7 @@ float4 fragmentMain(VSOut input) : SV_Target
     }
 
     // SSGI blend
-    float2 ssgiUV = (float2(input.position.x, input.position.y) / float2((float)screenWidth, (float)screenHeight)) * 2.0;
+    float2 ssgiUV = float2(input.position.x, input.position.y) / float2((float)screenWidth, (float)screenHeight);
     float3 indirect = ssgiTexture.SampleLevel(ssgiSampler, ssgiUV, 0).rgb;
     color += indirect * 0.5;
 

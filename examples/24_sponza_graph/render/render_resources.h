@@ -13,7 +13,8 @@ struct RenderResources {
 
     // Depth buffer
     GpuTextureHandle sceneDepth = GPU_NULL_HANDLE;
-    GpuTextureHandle sceneDepthView = GPU_NULL_HANDLE;
+    GpuTextureHandle sceneDepthDsv = GPU_NULL_HANDLE;
+    GpuTextureHandle sceneDepthSrv = GPU_NULL_HANDLE;
 
     // Light buffer
     GpuBufferHandle lightBuffer = GPU_NULL_HANDLE;
@@ -26,7 +27,8 @@ struct RenderResources {
 
     // SSGI textures
     GpuTextureHandle ssgiOutput = GPU_NULL_HANDLE;
-    GpuTextureHandle ssgiOutputView = GPU_NULL_HANDLE;
+    GpuTextureHandle ssgiOutputUav = GPU_NULL_HANDLE;
+    GpuTextureHandle ssgiOutputSrv = GPU_NULL_HANDLE;
     GpuTextureHandle ssgiPrev = GPU_NULL_HANDLE;
     GpuTextureHandle ssgiPrevView = GPU_NULL_HANDLE;
 

@@ -23,6 +23,7 @@ struct DemoPipelines {
     rhi::ComPtr<rhi::IShaderObject> shadowRootObj;
     rhi::ComPtr<rhi::IShaderProgram> forwardRoot;
     rhi::ComPtr<rhi::IShaderObject> forwardRootObj;
+    rhi::ComPtr<rhi::IShaderObject> ssgiRootObj;
 
     GpuShaderCompiler compiler = nullptr;
 };
