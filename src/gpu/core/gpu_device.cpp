@@ -12,7 +12,11 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
 
     rhi::DeviceDesc rhiDesc = {};
     rhiDesc.enableValidation = desc->enableDebugLayer;
-    rhiDesc.slang.targetProfile = "sm_6_0";
+    // Bindless descriptor handles require SM 6.6 on D3D12; let slang-rhi pick the highest supported profile.
+    rhiDesc.slang.targetProfile = nullptr;
+    rhiDesc.bindless.textureCount = 4096;
+    rhiDesc.bindless.bufferCount = 4096;
+    rhiDesc.bindless.samplerCount = 256;
 
     rhi::ComPtr<rhi::IDevice> rhiDevice;
 

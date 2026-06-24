@@ -114,19 +114,32 @@ GpuResult gpuDestroyTexture(GpuDevice device, GpuTextureHandle handle)
     return GPU_SUCCESS;
 }
 
-GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTextureViewType type, GpuTextureHandle* outViewHandle)
+static GpuResult gpuCreateTextureViewInternal(
+    GpuDevice device,
+    GpuTextureHandle texture,
+    GpuTextureViewType type,
+    const GpuTextureSubresourceRange* subresource,
+    GpuTextureHandle* outViewHandle)
 {
     if (!device || !gpuHandleIsValid(texture) || !outViewHandle) return GPU_ERROR_INVALID_ARGS;
 
     rhi::ITexture* tex = device->texturePool.resolve(texture.index, texture.generation);
     if (!tex) return GPU_ERROR_INVALID_ARGS;
 
+    const auto& texDesc = tex->getDesc();
     rhi::TextureViewDesc viewDesc = {};
-    viewDesc.format = tex->getDesc().format;
-    viewDesc.subresourceRange.mip = 0;
-    viewDesc.subresourceRange.mipCount = tex->getDesc().mipCount;
-    viewDesc.subresourceRange.layer = 0;
-    viewDesc.subresourceRange.layerCount = tex->getDesc().arrayLength;
+    viewDesc.format = texDesc.format;
+    if (subresource) {
+        viewDesc.subresourceRange.mip = subresource->mip;
+        viewDesc.subresourceRange.mipCount = subresource->mipCount > 0 ? subresource->mipCount : 1;
+        viewDesc.subresourceRange.layer = subresource->layer;
+        viewDesc.subresourceRange.layerCount = subresource->layerCount > 0 ? subresource->layerCount : 1;
+    } else {
+        viewDesc.subresourceRange.mip = 0;
+        viewDesc.subresourceRange.mipCount = texDesc.mipCount;
+        viewDesc.subresourceRange.layer = 0;
+        viewDesc.subresourceRange.layerCount = texDesc.arrayLength;
+    }
 
     // Set aspect based on view type
     if (type == GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL) {
@@ -157,6 +170,22 @@ GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTe
     outViewHandle->index = idx;
     outViewHandle->generation = device->textureViewPool.slots[idx].generation;
     return GPU_SUCCESS;
+}
+
+GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTextureViewType type, GpuTextureHandle* outViewHandle)
+{
+    return gpuCreateTextureViewInternal(device, texture, type, nullptr, outViewHandle);
+}
+
+GpuResult gpuCreateTextureSubresourceView(
+    GpuDevice device,
+    GpuTextureHandle texture,
+    GpuTextureViewType type,
+    const GpuTextureSubresourceRange* subresource,
+    GpuTextureHandle* outViewHandle)
+{
+    if (!subresource) return GPU_ERROR_INVALID_ARGS;
+    return gpuCreateTextureViewInternal(device, texture, type, subresource, outViewHandle);
 }
 
 GpuResult gpuDestroyTextureView(GpuDevice device, GpuTextureHandle viewHandle)

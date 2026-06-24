@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <cstring>
 
 static void writeTypeScriptType(std::stringstream& ss, const GpuTypeInfo* info, int indent);
 
@@ -224,6 +225,141 @@ GpuResult gpuGenerateJSON(GpuTypeInfo* typeInfo, const char* outputPath)
     std::stringstream ss;
     writeJsonType(ss, typeInfo, 0);
     ss << "\n";
+
+    std::ofstream file(outputPath);
+    if (!file.is_open()) return GPU_ERROR_INTERNAL;
+    file << ss.str();
+    return GPU_SUCCESS;
+}
+
+static const char* cppScalarType(const GpuTypeInfo* info)
+{
+    if (!info || !info->name) return "float";
+    const char* n = info->name;
+    if (strcmp(n, "float") == 0) return "float";
+    if (strcmp(n, "double") == 0) return "double";
+    if (strcmp(n, "half") == 0) return "uint16_t";
+    if (strcmp(n, "int") == 0) return "int32_t";
+    if (strcmp(n, "uint") == 0) return "uint32_t";
+    if (strcmp(n, "int64_t") == 0 || strcmp(n, "long") == 0) return "int64_t";
+    if (strcmp(n, "uint64_t") == 0 || strcmp(n, "ulong") == 0) return "uint64_t";
+    if (strcmp(n, "bool") == 0) return "uint32_t";
+    return "float";
+}
+
+static void writeCppTypeDecl(std::stringstream& ss, const GpuTypeInfo* info);
+
+static void writeCppFieldType(std::stringstream& ss, const GpuTypeInfo* info)
+{
+    if (!info) {
+        ss << "uint8_t";
+        return;
+    }
+
+    switch (info->kind) {
+    case GPU_TYPE_KIND_SCALAR:
+        ss << cppScalarType(info);
+        break;
+    case GPU_TYPE_KIND_VECTOR:
+        if (info->vector.count == 4) {
+            ss << cppScalarType(info->vector.scalarType) << "[4]";
+        } else if (info->vector.count == 3) {
+            ss << cppScalarType(info->vector.scalarType) << "[3]";
+        } else if (info->vector.count == 2) {
+            ss << cppScalarType(info->vector.scalarType) << "[2]";
+        } else {
+            ss << cppScalarType(info->vector.scalarType) << "[" << info->vector.count << "]";
+        }
+        break;
+    case GPU_TYPE_KIND_MATRIX:
+        ss << cppScalarType(info->matrix.scalarType) << "[" << info->matrix.colCount << "]["
+           << info->matrix.rowCount << "]";
+        break;
+    case GPU_TYPE_KIND_STRUCT:
+        ss << (info->name ? info->name : "GpuStruct");
+        break;
+    case GPU_TYPE_KIND_ARRAY:
+        writeCppFieldType(ss, info->array.element);
+        ss << "[" << info->array.count << "]";
+        break;
+    case GPU_TYPE_KIND_PARAMETER_BLOCK:
+        if (info->array.element) {
+            writeCppTypeDecl(ss, info->array.element);
+        }
+        break;
+    default:
+        ss << "uint8_t";
+        break;
+    }
+}
+
+static void writeCppStructBody(std::stringstream& ss, const GpuTypeInfo* info, int indent)
+{
+    if (!info || info->kind != GPU_TYPE_KIND_STRUCT) return;
+
+    uint32_t cursor = 0;
+    for (uint32_t i = 0; i < info->structInfo.fieldCount; i++) {
+        const GpuStructField* field = &info->structInfo.fields[i];
+        if (!field->name || !field->type) continue;
+        if (field->type->kind == GPU_TYPE_KIND_TEXTURE || field->type->kind == GPU_TYPE_KIND_SAMPLER ||
+            field->type->kind == GPU_TYPE_KIND_BUFFER) {
+            continue;
+        }
+
+        if (field->offset > cursor) {
+            writeIndent(ss, indent);
+            ss << "uint8_t _pad" << i << "[" << (field->offset - cursor) << "];\n";
+            cursor = field->offset;
+        }
+
+        writeIndent(ss, indent);
+        writeCppFieldType(ss, field->type);
+        ss << " " << field->name << ";\n";
+        cursor = field->offset + field->type->size;
+    }
+
+    if (info->size > cursor) {
+        writeIndent(ss, indent);
+        ss << "uint8_t _tailPad[" << (info->size - cursor) << "];\n";
+    }
+}
+
+static void writeCppTypeDecl(std::stringstream& ss, const GpuTypeInfo* info)
+{
+    if (!info || !info->name) return;
+
+    if (info->kind == GPU_TYPE_KIND_PARAMETER_BLOCK) {
+        // ParameterBlock<T> layout matches T for constant uploads.
+        if (info->array.element && info->array.element->kind == GPU_TYPE_KIND_STRUCT) {
+            writeCppTypeDecl(ss, info->array.element);
+        }
+        return;
+    }
+
+    if (info->kind != GPU_TYPE_KIND_STRUCT) return;
+
+    ss << "struct " << info->name << " {\n";
+    writeCppStructBody(ss, info, 1);
+    ss << "}; // size=" << info->size << "\n\n";
+}
+
+GpuResult gpuGenerateCppHeader(GpuTypeInfo* typeInfo, const char* outputPath)
+{
+    if (!typeInfo || !outputPath) return GPU_ERROR_INVALID_ARGS;
+
+    std::stringstream ss;
+    ss << "#pragma once\n";
+    ss << "// Auto-generated from Slang reflection. Do not edit.\n\n";
+    ss << "#include <stdint.h>\n\n";
+    ss << "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n";
+
+    if (typeInfo->kind == GPU_TYPE_KIND_STRUCT || typeInfo->kind == GPU_TYPE_KIND_PARAMETER_BLOCK) {
+        writeCppTypeDecl(ss, typeInfo);
+    } else {
+        ss << "// Root type is not a struct; use gpuGenerateJSON for layout details.\n";
+    }
+
+    ss << "#ifdef __cplusplus\n}\n#endif\n";
 
     std::ofstream file(outputPath);
     if (!file.is_open()) return GPU_ERROR_INTERNAL;

@@ -72,6 +72,44 @@ bool createDemoPipelines(GpuDevice device, DemoPipelines& p, GpuFormat surfaceFo
         }
     }
 
+    // G-buffer shader + pipeline
+    {
+        GpuShaderCompileDesc gcd = {};
+        gcd.sourcePath = "gbuffer.slang";
+        gcd.entryPoint = "vertexMain";
+        gcd.fragmentEntryPoint = "fragmentMain";
+        gcd.target = GPU_SHADER_TARGET_SPIRV;
+        if (gpuCompileShader(p.compiler, &gcd, &p.gbufferProgram) != GPU_SUCCESS) {
+            printf("G-buffer shader failed: %s\n", gpuGetShaderCompileDiagnostic(p.compiler));
+            return false;
+        }
+        p.gbufferRoot = p.gbufferProgram->rhiProgram;
+        if (SLANG_FAILED(rhiDevice->createRootShaderObject(p.gbufferRoot, p.gbufferRootObj.writeRef()))) {
+            printf("G-buffer root object failed\n"); return false;
+        }
+
+        ColorTargetDesc gbufTargets[2] = {};
+        gbufTargets[0].format = Format::RGBA16Float;
+        gbufTargets[1].format = Format::RGBA16Float;
+
+        RenderPipelineDesc gpd = {};
+        gpd.program = p.gbufferRoot;
+        gpd.inputLayout = p.inputLayout;
+        gpd.targets = gbufTargets;
+        gpd.targetCount = 2;
+        gpd.depthStencil.format = Format::D32Float;
+        gpd.depthStencil.depthTestEnable = true;
+        gpd.depthStencil.depthWriteEnable = true;
+        gpd.depthStencil.depthFunc = ComparisonFunc::Less;
+        gpd.rasterizer.cullMode = CullMode::None;
+        gpd.rasterizer.fillMode = FillMode::Solid;
+        gpd.label = "gbuffer_pipeline";
+        if (SLANG_FAILED(rhiDevice->createRenderPipeline(gpd, p.gbufferPipeline.writeRef()))) {
+            printf("G-buffer pipeline failed\n");
+            return false;
+        }
+    }
+
     // Forward shader + pipeline
     {
         GpuShaderCompileDesc fcd = {};
@@ -104,7 +142,8 @@ bool createDemoPipelines(GpuDevice device, DemoPipelines& p, GpuFormat surfaceFo
         fpd.rasterizer.fillMode = FillMode::Solid;
         fpd.label = "forward_pipeline";
         if (SLANG_FAILED(rhiDevice->createRenderPipeline(fpd, p.forwardPipeline.writeRef()))) {
-            printf("Forward pipeline failed\n"); return false;
+            printf("Forward pipeline failed\n");
+            return false;
         }
     }
 
@@ -140,6 +179,9 @@ bool createDemoPipelines(GpuDevice device, DemoPipelines& p, GpuFormat surfaceFo
             printf("Light cull shader compile failed (optional): %s\n", gpuGetShaderCompileDiagnostic(p.compiler));
         }
         if (p.lightCullProgram && p.lightCullProgram->rhiProgram) {
+            if (SLANG_FAILED(rhiDevice->createRootShaderObject(p.lightCullProgram->rhiProgram, p.lightCullRootObj.writeRef()))) {
+                printf("Light cull root object failed\n");
+            }
             ComputePipelineDesc cpd = {};
             cpd.program = p.lightCullProgram->rhiProgram;
             cpd.label = "light_cull_pipeline";
@@ -154,15 +196,19 @@ bool createDemoPipelines(GpuDevice device, DemoPipelines& p, GpuFormat surfaceFo
 
 void destroyDemoPipelines(GpuDevice device, DemoPipelines& p) {
     (void)device;
+    p.gbufferPipeline.setNull();
     p.shadowPipeline.setNull();
     p.forwardPipeline.setNull();
     p.ssgiPipeline.setNull();
     p.lightCullPipeline.setNull();
     p.shadowRootObj.setNull();
+    p.gbufferRootObj.setNull();
     p.forwardRootObj.setNull();
     p.ssgiRootObj.setNull();
+    p.lightCullRootObj.setNull();
     p.inputLayout.setNull();
     if (p.shadowProgram) { gpuDestroyShaderProgram(p.shadowProgram); p.shadowProgram = nullptr; }
+    if (p.gbufferProgram) { gpuDestroyShaderProgram(p.gbufferProgram); p.gbufferProgram = nullptr; }
     if (p.forwardProgram) { gpuDestroyShaderProgram(p.forwardProgram); p.forwardProgram = nullptr; }
     if (p.ssgiProgram) { gpuDestroyShaderProgram(p.ssgiProgram); p.ssgiProgram = nullptr; }
     if (p.lightCullProgram) { gpuDestroyShaderProgram(p.lightCullProgram); p.lightCullProgram = nullptr; }

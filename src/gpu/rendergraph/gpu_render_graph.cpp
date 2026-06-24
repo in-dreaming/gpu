@@ -305,6 +305,26 @@ static GpuResourceState accessToState(GpuGraphAccess access, GpuGraphResourceKin
     return GPU_RESOURCE_STATE_SHADER_RESOURCE;
 }
 
+static bool graphResourceIsDepthTexture(GpuDevice device, const GpuGraphResourceRecord& res)
+{
+    if (!device || res.kind != GPU_GRAPH_RESOURCE_TEXTURE) return false;
+    if (res.imported && res.importedTexture.index) {
+        rhi::ITexture* tex = device->texturePool.resolve(
+            res.importedTexture.index, res.importedTexture.generation);
+        if (tex) {
+            return (tex->getDesc().usage & rhi::TextureUsage::DepthStencil) != rhi::TextureUsage::None;
+        }
+    }
+    return (res.textureDesc.usage & GPU_TEXTURE_USAGE_DEPTH_STENCIL) != 0;
+}
+
+static GpuResourceState graphReadStateForResource(GpuDevice device, const GpuGraphResourceRecord& res)
+{
+    if (res.kind == GPU_GRAPH_RESOURCE_TEXTURE && graphResourceIsDepthTexture(device, res))
+        return GPU_RESOURCE_STATE_DEPTH_READ;
+    return GPU_RESOURCE_STATE_SHADER_RESOURCE;
+}
+
 GpuResult gpuGraphCompile(GpuGraph graph)
 {
     if (!graph) return GPU_ERROR_INVALID_ARGS;
@@ -496,6 +516,8 @@ GpuResult gpuGraphCompile(GpuGraph graph)
             if (isColorAttach || isDepthAttach) continue;
 
             GpuResourceState targetState = accessToState(acc.access, res.kind, pass.kind, false, false);
+            if (acc.access == GPU_GRAPH_ACCESS_READ)
+                targetState = graphReadStateForResource(graph->device, res);
             if (res.currentState != targetState) {
                 GpuCompiledBarrier b;
                 b.isTexture = (res.kind == GPU_GRAPH_RESOURCE_TEXTURE);
@@ -584,12 +606,16 @@ GpuResult gpuGraphExecute(GpuGraph graph, GpuCommandQueue queue)
                 if (ri < graph->resources.size()) {
                     auto& res = graph->resources[ri];
                     memset(&depthAtt, 0, sizeof(depthAtt));
-                    // Create depth-stencil view if needed
-                    if (res.depthView.index == 0) {
-                        GpuTextureHandle texH = res.imported ? res.importedTexture : res.realizedTexture;
-                        gpuCreateTextureView(graph->device, texH, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &res.depthView);
+                    if (gpuHandleIsValid(pass.depthAttachment.depthViewOverride)) {
+                        depthAtt.viewHandle = pass.depthAttachment.depthViewOverride;
+                    } else {
+                        // Create depth-stencil view if needed
+                        if (res.depthView.index == 0) {
+                            GpuTextureHandle texH = res.imported ? res.importedTexture : res.realizedTexture;
+                            gpuCreateTextureView(graph->device, texH, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &res.depthView);
+                        }
+                        depthAtt.viewHandle = res.depthView;
                     }
-                    depthAtt.viewHandle = res.depthView;
                     depthAtt.depthLoadOp = pass.depthAttachment.loadOp;
                     depthAtt.depthStoreOp = pass.depthAttachment.storeOp;
                     depthAtt.clearDepth = pass.depthAttachment.clearDepth;

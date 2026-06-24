@@ -27,8 +27,15 @@ struct CameraParams {
 
 struct PointLightData {
     float position[3]; float radius;
-    float color[3]; float pad0;
+    float color[3];
+    int32_t shadowMapIndex; // -1 = no shadow map; else 0..kMaxPointShadowSlots-1
+    uint32_t pad0;
 };
+
+static constexpr uint32_t kMaxPointShadowSlots = 8;
+static constexpr uint32_t kPointShadowMapSize = 256;
+static constexpr uint32_t kCubeFaceCount = 6;
+static constexpr uint32_t kShadowMapSize = 2048;
 
 struct ShadowCascadeData {
     float viewMatrix[16];
@@ -39,26 +46,24 @@ struct ShadowCascadeData {
 };
 
 struct LightCullParams {
-    float projMatrix[16];
-    float invProjMatrix[16];
-    float viewMatrix[16];
-    float invViewMatrix[16];
     uint32_t screenWidth;
     uint32_t screenHeight;
     uint32_t lightCount;
     uint32_t tileSize;
+    CameraParams camera;
 };
 
 struct SSGIParams {
-    float projMatrix[16];
-    float invProjMatrix[16];
-    float viewMatrix[16];
-    float invViewMatrix[16];
-    float cameraPos[3]; float pad0;
+    CameraParams camera;
+    float cameraPos[3];
+    float pad0;
     float stepSize;
     float maxDistance;
+    float thickness;
     uint32_t screenWidth;
     uint32_t screenHeight;
+    uint32_t fullWidth;
+    uint32_t fullHeight;
     uint32_t temporalFrame;
 };
 

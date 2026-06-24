@@ -48,11 +48,24 @@ typedef enum {
     GPU_TEXTURE_VIEW_TYPE_UNORDERED_ACCESS = 3,
 } GpuTextureViewType;
 
+typedef struct {
+    uint32_t mip;
+    uint32_t mipCount;
+    uint32_t layer;
+    uint32_t layerCount;
+} GpuTextureSubresourceRange;
+
 GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuTextureHandle* outHandle);
 GpuResult gpuDestroyTexture(GpuDevice device, GpuTextureHandle handle);
 
 // Create a texture view for a specific usage (e.g., render target)
 GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTextureViewType type, GpuTextureHandle* outViewHandle);
+GpuResult gpuCreateTextureSubresourceView(
+    GpuDevice device,
+    GpuTextureHandle texture,
+    GpuTextureViewType type,
+    const GpuTextureSubresourceRange* subresource,
+    GpuTextureHandle* outViewHandle);
 GpuResult gpuDestroyTextureView(GpuDevice device, GpuTextureHandle viewHandle);
 
 #ifdef __cplusplus

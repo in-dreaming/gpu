@@ -15,6 +15,9 @@ typedef uint32_t GpuDescriptorType;
 #define GPU_DESCRIPTOR_TYPE_BUFFER        1u
 #define GPU_DESCRIPTOR_TYPE_SAMPLER       2u
 
+#define GPU_DESCRIPTOR_ACCESS_READ        0u
+#define GPU_DESCRIPTOR_ACCESS_READ_WRITE  1u
+
 typedef struct {
     uint32_t maxDescriptors;
     GpuDescriptorType descriptorType;
@@ -29,6 +32,10 @@ GpuResult gpuCreateBindlessHeap(GpuDevice device, const GpuBindlessHeapDesc* des
 void gpuDestroyBindlessHeap(GpuBindlessHeap heap);
 
 uint32_t gpuBindlessAllocate(GpuBindlessHeap heap, GpuHandle resource);
+uint32_t gpuBindlessAllocateBuffer(GpuBindlessHeap heap, GpuHandle bufferHandle, uint32_t access);
+uint32_t gpuBindlessAllocateTextureView(GpuBindlessHeap heap, GpuHandle viewHandle, uint32_t access);
+uint32_t gpuBindlessAllocateCombinedTextureView(GpuBindlessHeap heap, GpuHandle viewHandle);
+GpuResult gpuBindlessUpdateTextureView(GpuBindlessHeap heap, uint32_t index, GpuHandle viewHandle, uint32_t access);
 void gpuBindlessFree(GpuBindlessHeap heap, uint32_t index);
 bool gpuBindlessIsAllocated(GpuBindlessHeap heap, uint32_t index);
 GpuResult gpuBindlessGetResource(GpuBindlessHeap heap, uint32_t index, GpuHandle* outResource);

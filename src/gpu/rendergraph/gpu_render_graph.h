@@ -77,6 +77,7 @@ typedef struct {
     GpuStoreOp storeOp;
     float clearDepth;
     uint8_t clearStencil;
+    GpuTextureHandle depthViewOverride; // optional; when set, binds this DSV instead of the texture default
 } GpuGraphDepthAttachment;
 
 void gpuGraphPassSetColorAttachments(GpuGraphPass pass, uint32_t count, const GpuGraphColorAttachment* attachments);

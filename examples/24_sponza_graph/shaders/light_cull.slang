@@ -1,61 +1,127 @@
-// Tile-based light culling compute shader
-// Culls point lights per tile (16x16 pixels) for forward rendering
+// Tiled light culling with per-tile depth range (clustered frustum slice)
+
+struct CameraParams
+{
+    float3 cameraPos;
+    float pad0;
+    float3 right;
+    float pad1;
+    float3 up;
+    float pad2;
+    float3 forward;
+    float pad3;
+    float2 proj;
+    float2 zParams;
+};
 
 struct PointLightData
 {
     float3 position;
     float radius;
     float3 color;
-    float pad;
+    int shadowMapIndex;
+    uint pad0;
 };
 
 struct LightCullParams
 {
-    float4x4 projMatrix;
-    float4x4 invProjMatrix;
-    float4x4 viewMatrix;
-    float4x4 invViewMatrix;
     uint screenWidth;
     uint screenHeight;
     uint lightCount;
     uint tileSize;
+    CameraParams camera;
 };
 
-LightCullParams cullParams;
-StructuredBuffer<PointLightData> pointLights;
-RWStructuredBuffer<uint> lightIndexBuffer;
-Texture2D<float> depthTexture;
-SamplerState depthSampler;
+ParameterBlock<LightCullParams> gCull;
 
+uniform StructuredBuffer<PointLightData>.Handle pointLights;
+uniform RWStructuredBuffer<uint>.Handle lightIndexBuffer;
+uniform Texture2D<float>.Handle depthTexture;
+uniform SamplerState.Handle depthSampler;
+
+groupshared uint gsMinDepthBits;
+groupshared uint gsMaxDepthBits;
 groupshared uint visibleLightCount;
 groupshared uint visibleLightIndices[128];
 
-float4 getFrustumPlane(uint corner, float tileLeft, float tileTop, float tileRight, float tileBottom, float nearZ, float farZ)
+float viewDepthFromDeviceDepth(float depth)
 {
-    // Compute frustum planes for the tile
-    float2 tileMin = float2(tileLeft, tileTop);
-    float2 tileMax = float2(tileRight, tileBottom);
+    float nearZ = gCull.camera.zParams.x;
+    float farZ = gCull.camera.zParams.y;
+    if (depth >= 0.9999)
+        return farZ;
+    return nearZ / max(1.0 - depth, 1e-5);
+}
 
-    float2 ndcCorner = float2(
-        corner & 1 ? tileMax.x : tileMin.x,
-        corner & 2 ? tileMax.y : tileMin.y
-    ) / float2(cullParams.screenWidth, cullParams.screenHeight) * 2.0 - 1.0;
-    ndcCorner.y = -ndcCorner.y;
+float3 viewPosFromPixelDepth(float2 pixel, float viewZ)
+{
+    float2 ndc = (pixel + 0.5) / float2((float)gCull.screenWidth, (float)gCull.screenHeight) * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    float vx = ndc.x * viewZ / gCull.camera.proj.x;
+    float vy = ndc.y * viewZ / gCull.camera.proj.y;
+    return float3(vx, vy, viewZ);
+}
 
-    float nearDepth = nearZ;
-    float4 nearPoint = mul(cullParams.invProjMatrix, float4(ndcCorner, nearDepth, 1.0));
-    nearPoint /= nearPoint.w;
+float3 lightViewPos(float3 worldPos)
+{
+    float3 d = worldPos - gCull.camera.cameraPos;
+    return float3(
+        dot(d, gCull.camera.right),
+        dot(d, gCull.camera.up),
+        dot(d, gCull.camera.forward));
+}
 
-    float4 viewNear = mul(cullParams.invViewMatrix, nearPoint);
+void expandTileViewAabb(float2 tileMinPx, float2 tileMaxPx, float minZ, float maxZ, out float3 aabbMin, out float3 aabbMax)
+{
+    aabbMin = float3(1e9, 1e9, 1e9);
+    aabbMax = float3(-1e9, -1e9, -1e9);
 
-    float farDepth = farZ;
-    float4 farPoint = mul(cullParams.invProjMatrix, float4(ndcCorner, farDepth, 1.0));
-    farPoint /= farPoint.w;
+    float2 corners[4] = {
+        tileMinPx,
+        float2(tileMaxPx.x, tileMinPx.y),
+        tileMaxPx,
+        float2(tileMinPx.x, tileMaxPx.y)
+    };
 
-    float4 viewFar = mul(cullParams.invViewMatrix, farPoint);
+    for (int c = 0; c < 4; c++)
+    {
+        for (int zIdx = 0; zIdx < 2; zIdx++)
+        {
+            float z = (zIdx == 0) ? minZ : maxZ;
+            float3 vp = viewPosFromPixelDepth(corners[c], z);
+            aabbMin = min(aabbMin, vp);
+            aabbMax = max(aabbMax, vp);
+        }
+    }
+}
 
-    float3 normal = normalize(cross(viewFar.xyz - viewNear.xyz, viewFar.xyz));
-    return float4(normal, dot(normal, viewNear.xyz));
+bool sphereIntersectsAabb(float3 center, float radius, float3 bmin, float3 bmax)
+{
+    float3 closest = clamp(center, bmin, bmax);
+    float3 delta = center - closest;
+    return dot(delta, delta) <= radius * radius;
+}
+
+bool lightIntersectsTileCluster(PointLightData light, float2 tileMinPx, float2 tileMaxPx, float tileMinZ, float tileMaxZ)
+{
+    float2 screenMax = float2((float)gCull.screenWidth, (float)gCull.screenHeight) - 1.0;
+    tileMinPx = max(tileMinPx - 2.0, float2(0, 0));
+    tileMaxPx = min(tileMaxPx + 2.0, screenMax);
+
+    float3 lightView = lightViewPos(light.position);
+    float nearZ = gCull.camera.zParams.x;
+
+    if (lightView.z + light.radius < nearZ)
+        return false;
+    if (lightView.z - light.radius > tileMaxZ + 1.0)
+        return false;
+
+    float3 aabbMin, aabbMax;
+    expandTileViewAabb(tileMinPx, tileMaxPx, tileMinZ, tileMaxZ, aabbMin, aabbMax);
+
+    aabbMin -= light.radius;
+    aabbMax += light.radius;
+    return sphereIntersectsAabb(lightView, light.radius, aabbMin, aabbMax);
 }
 
 [shader("compute")]
@@ -64,72 +130,75 @@ void computeMain(uint3 groupId : SV_GroupID, uint3 localId : SV_GroupThreadID, u
 {
     if (localId.x == 0 && localId.y == 0)
     {
+        gsMinDepthBits = 0x7F7FFFFF;
+        gsMaxDepthBits = 0;
         visibleLightCount = 0;
     }
 
-    // Determine tile min/max depth
-    uint2 tileMin = groupId.xy * 16;
-    uint2 tileMax = min(tileMin + 16, uint2(cullParams.screenWidth, cullParams.screenHeight));
-
-    float minDepth = 1.0;
-    float maxDepth = 0.0;
-    if (threadId.x < cullParams.screenWidth && threadId.y < cullParams.screenHeight)
-    {
-        float2 uv = (float2(threadId.xy) + 0.5) / float2(cullParams.screenWidth, cullParams.screenHeight);
-        float depth = depthTexture[uint2(threadId.xy)].r;
-        if (depth < minDepth) minDepth = depth;
-        if (depth > maxDepth) maxDepth = depth;
-    }
-
-    // TODO: properly compute min/max depth per tile using groupshared
-    // For simplicity, use fixed near/far
-    float nearZ = 0.0;
-    float farZ = 1.0;
-
-    // Compute frustum planes for this tile
-    float4 frustum[4];
-    frustum[0] = getFrustumPlane(0, (float)tileMin.x, (float)tileMin.y, (float)tileMax.x, (float)tileMax.y, nearZ, farZ);
-    frustum[1] = getFrustumPlane(1, (float)tileMin.x, (float)tileMin.y, (float)tileMax.x, (float)tileMax.y, nearZ, farZ);
-    frustum[2] = getFrustumPlane(2, (float)tileMin.x, (float)tileMin.y, (float)tileMax.x, (float)tileMax.y, nearZ, farZ);
-    frustum[3] = getFrustumPlane(3, (float)tileMin.x, (float)tileMin.y, (float)tileMax.x, (float)tileMax.y, nearZ, farZ);
-
     GroupMemoryBarrierWithGroupSync();
 
-    // Cull lights for this tile
-    for (uint i = localId.y * 16 + localId.x; i < cullParams.lightCount; i += 256)
-    {
-        PointLightData light = pointLights[i];
-        float3 viewPos = mul(cullParams.viewMatrix, float4(light.position.x, light.position.y, light.position.z, 1.0)).xyz;
-        float3 lightPos = light.position;
+    uint2 tileMin = groupId.xy * gCull.tileSize;
+    uint2 tileMax = min(tileMin + gCull.tileSize, uint2(gCull.screenWidth, gCull.screenHeight));
+    float2 tileMinPx = float2(tileMin);
+    float2 tileMaxPx = float2(tileMax - uint2(1, 1));
 
-        // Check against frustum planes
-        bool visible = true;
-        for (int p = 0; p < 4 && visible; p++)
-        {
-            float d = dot(frustum[p].xyz, lightPos) - frustum[p].w;
-            if (d < -light.radius) visible = false;
-        }
-
-        if (visible)
-        {
-            uint idx;
-            InterlockedAdd(visibleLightCount, 1, idx);
-            if (idx < 128) visibleLightIndices[idx] = i;
-        }
-    }
-
-    GroupMemoryBarrierWithGroupSync();
-
-    // Write visible light indices to global buffer
-    uint tileIndex = groupId.y * ((cullParams.screenWidth + 15) / 16) + groupId.x;
+    uint tileIndex = groupId.y * ((gCull.screenWidth + gCull.tileSize - 1) / gCull.tileSize) + groupId.x;
     uint base = tileIndex * 128;
-    for (uint j = localId.y * 16 + localId.x; j < visibleLightCount; j += 256)
-    {
-        lightIndexBuffer[base + j] = visibleLightIndices[j];
-    }
 
     if (localId.x == 0 && localId.y == 0)
     {
-        lightIndexBuffer[base + 127] = visibleLightCount; // store count at last slot
+        for (uint slot = 0; slot < 128; slot++)
+            lightIndexBuffer[base + slot] = 0;
     }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (threadId.x < gCull.screenWidth && threadId.y < gCull.screenHeight)
+    {
+        float2 uv = (float2(threadId.xy) + 0.5) / float2((float)gCull.screenWidth, (float)gCull.screenHeight);
+        float depth = depthTexture.SampleLevel(depthSampler, uv, 0).r;
+        if (depth < 0.9999)
+        {
+            float viewZ = viewDepthFromDeviceDepth(depth);
+            uint zBits = asuint(viewZ);
+            InterlockedMin(gsMinDepthBits, zBits);
+            InterlockedMax(gsMaxDepthBits, zBits);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    float tileMinZ = asfloat(gsMinDepthBits);
+    float tileMaxZ = asfloat(gsMaxDepthBits);
+    if (gsMaxDepthBits == 0)
+    {
+        tileMinZ = gCull.camera.zParams.x;
+        tileMaxZ = gCull.camera.zParams.y;
+    }
+    else
+    {
+        tileMinZ = max(tileMinZ - 2.0, gCull.camera.zParams.x);
+        tileMaxZ = min(tileMaxZ + 8.0, gCull.camera.zParams.y);
+    }
+
+    for (uint i = localId.y * 16 + localId.x; i < gCull.lightCount; i += 256)
+    {
+        PointLightData light = pointLights[i];
+        if (lightIntersectsTileCluster(light, tileMinPx, tileMaxPx, tileMinZ, tileMaxZ))
+        {
+            uint idx;
+            InterlockedAdd(visibleLightCount, 1, idx);
+            if (idx < 127)
+                visibleLightIndices[idx] = i;
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint cappedVisibleLightCount = min(visibleLightCount, 127u);
+    for (uint j = localId.y * 16 + localId.x; j < cappedVisibleLightCount; j += 256)
+        lightIndexBuffer[base + j] = visibleLightIndices[j];
+
+    if (localId.x == 0 && localId.y == 0)
+        lightIndexBuffer[base + 127] = cappedVisibleLightCount;
 }

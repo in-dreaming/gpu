@@ -186,7 +186,8 @@ float4 fragmentMain(VSOut input) : SV_Target
     float3 light = normalize(float3(0.45, 0.75, 0.35));
     float ndl = saturate(dot(n, light));
     float layer = clamp(round(input.material), 0.0, 4095.0);
-    float3 albedo = baseColorArray.SampleLevel(linearSampler, float3(frac(input.uv), layer), 0).rgb;
+    float2 sampleUv = float2(frac(input.uv.x), 1.0 - frac(input.uv.y));
+    float3 albedo = baseColorArray.SampleLevel(linearSampler, float3(sampleUv, layer), 0).rgb;
     float fog = saturate(input.viewDepth / 2600.0);
     float3 color = albedo * (0.22 + 0.78 * ndl);
     color = lerp(color, float3(0.055, 0.065, 0.085), fog);

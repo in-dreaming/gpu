@@ -1,5 +1,6 @@
 #include "gpu/reflection/gpu_type_info.h"
 #include <cstdlib>
+#include <cstring>
 
 void gpuTypeInfoDestroy(GpuTypeInfo* info)
 {
@@ -7,6 +8,7 @@ void gpuTypeInfoDestroy(GpuTypeInfo* info)
 
     switch (info->kind) {
     case GPU_TYPE_KIND_ARRAY:
+    case GPU_TYPE_KIND_PARAMETER_BLOCK:
         gpuTypeInfoDestroy(info->array.element);
         break;
     case GPU_TYPE_KIND_STRUCT:
@@ -28,4 +30,14 @@ void gpuTypeInfoDestroy(GpuTypeInfo* info)
 
     free(info->name);
     free(info);
+}
+
+GpuTypeInfo* gpuTypeInfoFindField(GpuTypeInfo* root, const char* fieldName)
+{
+    if (!root || !fieldName || root->kind != GPU_TYPE_KIND_STRUCT) return nullptr;
+    for (uint32_t i = 0; i < root->structInfo.fieldCount; i++) {
+        const GpuStructField* field = &root->structInfo.fields[i];
+        if (field->name && strcmp(field->name, fieldName) == 0) return field->type;
+    }
+    return nullptr;
 }

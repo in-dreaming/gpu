@@ -9,6 +9,7 @@ extern "C" {
 
 GpuResult gpuGenerateTypeScript(GpuTypeInfo* typeInfo, const char* outputPath);
 GpuResult gpuGenerateJSON(GpuTypeInfo* typeInfo, const char* outputPath);
+GpuResult gpuGenerateCppHeader(GpuTypeInfo* typeInfo, const char* outputPath);
 
 #ifdef __cplusplus
 }

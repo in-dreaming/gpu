@@ -152,7 +152,38 @@ bool createSponzaMaterialTextures(GpuDevice device, const char* root, SponzaScen
     if (dummy) dummy->release();
     device->texturePool.slots[out.baseColorArray.index].ptr = rhiTex.detach();
 
-    gpuCreateTextureView(device, out.baseColorArray, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &out.baseColorView);
+    if (gpuCreateTextureView(device, out.baseColorArray, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &out.baseColorView) !=
+        GPU_SUCCESS) {
+        printf("Texture array view failed\n");
+        return false;
+    }
+
+    // Match 21_sponza_data_driven: sampler on the array view used for graphics sampling.
+    {
+        rhi::ITexture* tex = device->texturePool.resolve(out.baseColorArray.index, out.baseColorArray.generation);
+        rhi::ITextureView* view =
+            device->textureViewPool.resolve(out.baseColorView.index, out.baseColorView.generation);
+        if (!tex || !view) {
+            printf("Texture view resolve failed\n");
+            return false;
+        }
+        rhi::TextureViewDesc viewDesc = {};
+        viewDesc.sampler = sampler;
+        viewDesc.label = "sponza_texarray_view";
+        rhi::ComPtr<rhi::ITextureView> arrayView;
+        if (SLANG_FAILED(tex->createView(viewDesc, arrayView.writeRef())) || !arrayView) {
+            printf("Texture array view (sampler) failed\n");
+            return false;
+        }
+        gpuDestroyTextureView(device, out.baseColorView);
+        uint32_t viewIdx = device->textureViewPool.allocate(arrayView.detach());
+        if (viewIdx == 0) {
+            printf("Texture view handle alloc failed\n");
+            return false;
+        }
+        out.baseColorView.index = viewIdx;
+        out.baseColorView.generation = device->textureViewPool.slots[viewIdx].generation;
+    }
 
     out.layerSize = ls;
     out.layerCount = lc;

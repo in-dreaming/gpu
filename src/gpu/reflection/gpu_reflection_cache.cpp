@@ -134,6 +134,19 @@ static GpuTypeInfo* buildTypeInfo(slang::TypeLayoutReflection* typeLayout)
         return buildMatrixInfo(typeLayout);
     case slang::TypeReflection::Kind::Array:
         return buildArrayInfo(typeLayout);
+    case slang::TypeReflection::Kind::ParameterBlock: {
+        GpuTypeInfo* info = (GpuTypeInfo*)calloc(1, sizeof(GpuTypeInfo));
+        info->kind = GPU_TYPE_KIND_PARAMETER_BLOCK;
+        info->size = (uint32_t)typeLayout->getSize();
+        const char* name = type->getName();
+        info->name = copyStr(name);
+        auto* elementLayout = typeLayout->getElementTypeLayout();
+        if (elementLayout) {
+            info->array.element = buildTypeInfo(elementLayout);
+            info->array.count = 1;
+        }
+        return info;
+    }
     default: {
         GpuTypeInfo* info = (GpuTypeInfo*)calloc(1, sizeof(GpuTypeInfo));
         info->kind = slangTypeKindToGpu(kind);

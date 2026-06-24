@@ -46,6 +46,9 @@ struct GpuTypeInfo {
 
 void gpuTypeInfoDestroy(GpuTypeInfo* info);
 
+// Search a reflected struct/global root for a named field (e.g. "gFwd").
+GpuTypeInfo* gpuTypeInfoFindField(GpuTypeInfo* root, const char* fieldName);
+
 #ifdef __cplusplus
 }
 #endif

@@ -19,7 +19,8 @@ struct PointLightData
     float3 position;
     float radius;
     float3 color;
-    float pad;
+    int shadowMapIndex;
+    uint pad0;
 };
 
 struct ShadowCascadeData
@@ -33,26 +34,24 @@ struct ShadowCascadeData
 
 struct LightCullParams
 {
-    float4x4 projMatrix;
-    float4x4 invProjMatrix;
-    float4x4 viewMatrix;
-    float4x4 invViewMatrix;
     uint screenWidth;
     uint screenHeight;
     uint lightCount;
     uint tileSize;
+    CameraParams camera;
 };
 
 struct SSGIParams
 {
-    float4x4 projMatrix;
-    float4x4 invProjMatrix;
-    float4x4 viewMatrix;
-    float4x4 invViewMatrix;
+    CameraParams camera;
     float3 cameraPos;
+    float pad0;
     float stepSize;
     float maxDistance;
+    float thickness;
     uint screenWidth;
     uint screenHeight;
+    uint fullWidth;
+    uint fullHeight;
     uint temporalFrame;
 };

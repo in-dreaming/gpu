@@ -131,13 +131,18 @@ endif()
 set(24_SPONZA_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/camera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/shadow_math.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/sponza_loader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/render_resources.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/material_textures.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/pipelines.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/pass_bindings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/pass_callbacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/frame_graph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/frame_update.cpp
 )
 set(24_SPONZA_SHADERS
-    shadow.slang forward.slang ssgi.slang light_cull.slang
+    shadow.slang gbuffer.slang forward.slang ssgi.slang light_cull.slang
 )
 add_executable(24_sponza_graph ${24_SPONZA_SOURCES})
 target_link_libraries(24_sponza_graph PRIVATE gpu)
@@ -180,7 +185,7 @@ endforeach()
 add_custom_command(TARGET 24_sponza_graph POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3-shared>" "${_out_dir}/"
 )
-foreach(_shader shadow.slang forward.slang ssgi.slang light_cull.slang)
+foreach(_shader shadow.slang gbuffer.slang forward.slang ssgi.slang light_cull.slang)
     add_custom_command(TARGET 24_sponza_graph POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/shaders/${_shader}"

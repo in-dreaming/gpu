@@ -1,5 +1,7 @@
-// Screen-space global illumination compute shader
-// Simple ray march in screen-space to approximate indirect lighting
+// Screen-space global illumination from G-buffer color / normal / depth
+
+static const uint kSSGISamples = 6;
+static const uint kSSGIMaxSteps = 32;
 
 struct CameraParams
 {
@@ -17,49 +19,114 @@ struct CameraParams
 
 struct SSGIParams
 {
-    float4x4 projMatrix;
-    float4x4 invProjMatrix;
-    float4x4 viewMatrix;
-    float4x4 invViewMatrix;
+    CameraParams camera;
     float3 cameraPos;
     float pad0;
     float stepSize;
     float maxDistance;
+    float thickness;
     uint screenWidth;
     uint screenHeight;
+    uint fullWidth;
+    uint fullHeight;
     uint temporalFrame;
 };
 
-CameraParams camera;
-SSGIParams ssgiParams;
-Texture2D<float> depthTexture;
-SamplerState depthSampler;
-RWTexture2D<float4> outputTexture;
+ParameterBlock<SSGIParams> gSSGI;
 
-float3 getWorldPos(float2 uv, float depth)
+uniform Texture2D<float4>.Handle albedoTexture;
+uniform Texture2D<float4>.Handle normalTexture;
+uniform Texture2D<float>.Handle depthTexture;
+uniform SamplerState.Handle sceneSampler;
+uniform RWTexture2D<float4>.Handle outputTexture;
+
+float hash11(uint n)
 {
-    float4 clipPos = float4(uv * 2.0 - 1.0, depth, 1.0);
-    float4 worldPos = mul(ssgiParams.invViewMatrix, mul(ssgiParams.invProjMatrix, clipPos));
-    return worldPos.xyz / worldPos.w;
+    n = (n << 13u) ^ n;
+    return fract((float)(n * (n * n * 15731u + 789221u) + 1376312589u) / 4294967296.0);
 }
 
-float3 getNormal(float2 uv, float2 texelSize)
+float2 hash22(uint2 n)
 {
-    float c = depthTexture.SampleLevel(depthSampler, uv, 0).r;
-    float l = depthTexture.SampleLevel(depthSampler, uv + float2(-texelSize.x, 0), 0).r;
-    float r = depthTexture.SampleLevel(depthSampler, uv + float2(texelSize.x, 0), 0).r;
-    float d = depthTexture.SampleLevel(depthSampler, uv + float2(0, texelSize.y), 0).r;
-    float u = depthTexture.SampleLevel(depthSampler, uv + float2(0, -texelSize.y), 0).r;
+    return float2(hash11(n.x ^ n.y), hash11(n.y ^ (n.x * 3u)));
+}
 
-    float3 wp = getWorldPos(uv, c);
-    float3 wl = getWorldPos(uv + float2(-texelSize.x, 0), l);
-    float3 wr = getWorldPos(uv + float2(texelSize.x, 0), r);
-    float3 wd = getWorldPos(uv + float2(0, texelSize.y), d);
-    float3 wu = getWorldPos(uv + float2(0, -texelSize.y), u);
+float viewDepthFromDeviceDepth(float depth)
+{
+    float nearZ = gSSGI.camera.zParams.x;
+    if (depth >= 0.9999)
+        return gSSGI.camera.zParams.y;
+    return nearZ / max(1.0 - depth, 1e-5);
+}
 
-    float3 dx = wr - wl;
-    float3 dy = wd - wu;
-    return normalize(cross(dx, dy));
+float3 worldPosFromUvDepth(float2 uv, float depth)
+{
+    float viewZ = viewDepthFromDeviceDepth(depth);
+    float2 ndc = uv * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    float vx = ndc.x * viewZ / gSSGI.camera.proj.x;
+    float vy = ndc.y * viewZ / gSSGI.camera.proj.y;
+    return gSSGI.camera.cameraPos +
+           gSSGI.camera.right * vx +
+           gSSGI.camera.up * vy +
+           gSSGI.camera.forward * viewZ;
+}
+
+float3 viewPosFromWorld(float3 worldPos)
+{
+    float3 d = worldPos - gSSGI.camera.cameraPos;
+    return float3(
+        dot(d, gSSGI.camera.right),
+        dot(d, gSSGI.camera.up),
+        dot(d, gSSGI.camera.forward));
+}
+
+bool projectToScreen(float3 worldPos, out float2 uv, out float viewZ)
+{
+    float3 viewPos = viewPosFromWorld(worldPos);
+    viewZ = viewPos.z;
+    if (viewZ <= gSSGI.camera.zParams.x)
+        return false;
+    float2 ndc = float2(viewPos.x * gSSGI.camera.proj.x, viewPos.y * gSSGI.camera.proj.y) / viewZ;
+    uv = ndc * 0.5 + 0.5;
+    uv.y = 1.0 - uv.y;
+    return all(uv >= 0.0) && all(uv <= 1.0);
+}
+
+float3 cosineSampleHemisphere(float3 normal, float2 xi)
+{
+    float phi = 6.2831853 * xi.x;
+    float cosTheta = sqrt(1.0 - xi.y);
+    float sinTheta = sqrt(xi.y);
+    float3 up = abs(normal.y) < 0.999 ? float3(0, 1, 0) : float3(1, 0, 0);
+    float3 tangent = normalize(cross(up, normal));
+    float3 bitangent = cross(normal, tangent);
+    return normalize(tangent * cos(phi) * sinTheta + bitangent * sin(phi) * sinTheta + normal * cosTheta);
+}
+
+bool traceScreenSpaceRay(float3 origin, float3 dir, out float2 hitUv)
+{
+    float traveled = gSSGI.stepSize;
+    float3 pos = origin;
+    float2 uv = 0;
+    float rayViewZ = 0;
+
+    for (uint step = 0; step < kSSGIMaxSteps && traveled < gSSGI.maxDistance; step++)
+    {
+        pos += dir * gSSGI.stepSize;
+        traveled += gSSGI.stepSize;
+        if (!projectToScreen(pos, uv, rayViewZ))
+            return false;
+
+        float sceneDepth = depthTexture.SampleLevel(sceneSampler, uv, 0).r;
+        float sceneViewZ = viewDepthFromDeviceDepth(sceneDepth);
+        if (rayViewZ >= sceneViewZ && (rayViewZ - sceneViewZ) <= gSSGI.thickness)
+        {
+            hitUv = uv;
+            return true;
+        }
+    }
+    return false;
 }
 
 [shader("compute")]
@@ -67,55 +134,45 @@ float3 getNormal(float2 uv, float2 texelSize)
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     uint2 pos = dispatchThreadID.xy;
-    if (pos.x >= ssgiParams.screenWidth || pos.y >= ssgiParams.screenHeight) return;
+    if (pos.x >= gSSGI.screenWidth || pos.y >= gSSGI.screenHeight)
+        return;
 
-    float2 uv = (float2(pos) + 0.5) / float2(ssgiParams.screenWidth, ssgiParams.screenHeight);
-    float depth = depthTexture.SampleLevel(depthSampler, uv, 0).r;
+    float2 uv = (float2(pos) + 0.5) / float2((float)gSSGI.screenWidth, (float)gSSGI.screenHeight);
+    float2 fullUv = (float2(pos) * 2.0 + 1.0) * 0.5 / float2((float)gSSGI.fullWidth, (float)gSSGI.fullHeight);
 
-    if (depth >= 1.0)
+    float depth = depthTexture.SampleLevel(sceneSampler, fullUv, 0).r;
+    if (depth >= 0.9999)
     {
         outputTexture[pos] = float4(0, 0, 0, 0);
         return;
     }
 
-    float3 worldPos = getWorldPos(uv, depth);
-    float3 normal = getNormal(uv, float2(1.0 / ssgiParams.screenWidth, 1.0 / ssgiParams.screenHeight));
-    float3 viewDir = normalize(ssgiParams.cameraPos - worldPos);
+    float3 worldPos = worldPosFromUvDepth(fullUv, depth);
+    float3 normal = normalize(normalTexture.SampleLevel(sceneSampler, fullUv, 0).rgb * 2.0 - 1.0);
+    float3 albedo = albedoTexture.SampleLevel(sceneSampler, fullUv, 0).rgb;
 
-    // Random ray direction (hemisphere oriented by normal)
-    uint seed = pos.x ^ (pos.y << 7) ^ (ssgiParams.temporalFrame << 13);
-    float randAngle = (seed & 0xFFFF) / 65536.0 * 6.28318;
-    float randCos = ((seed >> 16) & 0xFFFF) / 65536.0;
-    float randSin = sqrt(1.0 - randCos * randCos);
+    float3 indirect = 0;
+    uint baseSeed = pos.x ^ (pos.y << 10) ^ (gSSGI.temporalFrame << 20);
 
-    float3 tangent = normalize(cross(normal, abs(normal.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0)));
-    float3 bitangent = cross(normal, tangent);
-    float3 rayDir = normalize(tangent * cos(randAngle) * randSin + bitangent * sin(randAngle) * randSin + normal * randCos);
-
-    // Ray march
-    float3 rayPos = worldPos + normal * 0.1;
-    float3 indirect = float3(0, 0, 0);
-    int sampleCount = 0;
-
-    for (float t = 0.1; t < ssgiParams.maxDistance; t += ssgiParams.stepSize)
+    for (uint s = 0; s < kSSGISamples; s++)
     {
-        float3 samplePos = rayPos + rayDir * t;
-        float4 clipPos = mul(ssgiParams.projMatrix, float4(samplePos - camera.cameraPos, 1.0));
-        // TODO: proper camera projection (simplified)
-        float3 sampleUV = clipPos.xyz / clipPos.w * 0.5 + 0.5;
-        if (sampleUV.x < 0 || sampleUV.x > 1 || sampleUV.y < 0 || sampleUV.y > 1) break;
+        float2 xi = hash22(uint2(baseSeed, s * 17u + 3u));
+        float3 rayDir = cosineSampleHemisphere(normal, xi);
+        float2 hitUv;
+        if (!traceScreenSpaceRay(worldPos, rayDir, hitUv))
+            continue;
 
-        float sampleDepth = depthTexture.SampleLevel(depthSampler, sampleUV.xy, 0).r;
-        float3 sampleWorld = getWorldPos(sampleUV.xy, sampleDepth);
-        float distToSample = length(sampleWorld - samplePos);
+        float3 hitAlbedo = albedoTexture.SampleLevel(sceneSampler, hitUv, 0).rgb;
+        float hitDepth = depthTexture.SampleLevel(sceneSampler, hitUv, 0).r;
+        float3 hitPos = worldPosFromUvDepth(hitUv, hitDepth);
+        float3 hitNormal = normalize(normalTexture.SampleLevel(sceneSampler, hitUv, 0).rgb * 2.0 - 1.0);
 
-        if (distToSample < ssgiParams.stepSize * 2.0)
-        {
-            indirect += float3(0.02, 0.03, 0.05); // simple ambient contribution
-            sampleCount++;
-        }
+        float3 toHit = normalize(hitPos - worldPos);
+        float bounceWeight = saturate(dot(normal, toHit)) * saturate(dot(hitNormal, -toHit));
+        indirect += hitAlbedo * bounceWeight;
     }
 
-    if (sampleCount > 0) indirect /= sampleCount;
+  indirect /= (float)kSSGISamples;
+    indirect *= albedo;
     outputTexture[pos] = float4(indirect, 1.0);
 }

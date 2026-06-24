@@ -51,6 +51,10 @@
 #include "gpu/layout/gpu_parameter_block.h"
 #include "gpu/layout/gpu_pipeline_layout.h"
 
+// Reflection code generation
+#include "gpu/reflection/gpu_reflection_cache.h"
+#include "gpu/reflection/gpu_meta_gen.h"
+
 // Queue (Phase 2)
 #include "gpu/queue/gpu_multi_queue.h"
 
