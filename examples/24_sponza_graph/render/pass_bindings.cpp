@@ -21,6 +21,23 @@ static bool bindBaseColorArrayBindings(rhi::ShaderCursor cursor, const FrameData
     return ok;
 }
 
+static bool bindShadowResources(rhi::ShaderCursor cursor, const FrameData& frame, bool logFailures)
+{
+    if (!frame.device || !frame.resources) return false;
+    const RenderResources& res = *frame.resources;
+    const char* mapNames[] = {"shadowMap0", "shadowMap1", "shadowMap2", "shadowMap3"};
+    bool ok = true;
+    for (int i = 0; i < 4; i++) {
+        auto* view = static_cast<rhi::ITextureView*>(frame.device->textureViewPool.resolve(
+            res.cascadeSRV[i].index, res.cascadeSRV[i].generation));
+        ok = shaderCursorSetBinding(cursor, mapNames[i], view, logFailures ? mapNames[i] : nullptr) && ok;
+    }
+    auto* sampler = static_cast<rhi::ISampler*>(frame.device->samplerPool.resolve(
+        res.shadowSampler.index, res.shadowSampler.generation));
+    ok = shaderCursorSetBinding(cursor, "shadowSampler", sampler, logFailures ? "shadowSampler" : nullptr) && ok;
+    return ok;
+}
+
 static bool bindForwardPassResources(rhi::IShaderObject* root, const FrameData& frame, bool logFailures)
 {
     if (!root) return false;
@@ -30,15 +47,8 @@ static bool bindForwardPassResources(rhi::IShaderObject* root, const FrameData& 
 
     // Graphics pass: direct RHI binding (same as 21_sponza_data_driven). Bindless heap still validates descriptors.
     ok = bindBaseColorArrayBindings(c, frame, logFailures) && ok;
+    ok = bindShadowResources(c, frame, logFailures) && ok;
 
-    const char* shadowNames[] = {"shadowMap0", "shadowMap1", "shadowMap2", "shadowMap3"};
-    for (int i = 0; i < 4; i++) {
-        ok = shaderCursorSetBindlessHeap(c, shadowNames[i], res.textureBindlessHeap, res.bindless.cascadeShadows[i],
-                                           logFailures ? shadowNames[i] : nullptr) && ok;
-    }
-
-    ok = shaderCursorSetBindlessHeap(c, "shadowSampler", res.samplerBindlessHeap, res.bindless.shadowSampler,
-                                       logFailures ? "shadowSampler" : nullptr) && ok;
     ok = shaderCursorSetBindlessHeap(c, "pointLights", res.bufferBindlessHeap, res.bindless.lightBuffer,
                                        logFailures ? "pointLights" : nullptr) && ok;
     ok = shaderCursorSetBindlessHeap(c, "ssgiTexture", res.textureBindlessHeap, res.bindless.ssgiTexture,
@@ -91,6 +101,12 @@ static bool bindLightCullPassResources(rhi::IShaderObject* root, const FrameData
     ok = shaderCursorSetBindlessHeap(c, "depthSampler", res.samplerBindlessHeap, res.bindless.linearSampler,
                                        logFailures ? "depthSampler" : nullptr) && ok;
     return ok;
+}
+
+bool bindForwardShadowResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)
+{
+    if (!pipelines.forwardRootObj) return false;
+    return bindShadowResources(rhi::ShaderCursor(pipelines.forwardRootObj.get()), frame, logFailures);
 }
 
 bool bindAllPassResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)

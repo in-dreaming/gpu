@@ -131,7 +131,9 @@ endif()
 set(24_SPONZA_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/camera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/dir_light_control.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/shadow_math.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/simple_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/sponza_loader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/render_resources.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/material_textures.cpp
@@ -140,6 +142,7 @@ set(24_SPONZA_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/pass_callbacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/frame_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/frame_update.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/shadow_diag.cpp
 )
 set(24_SPONZA_SHADERS
     shadow.slang gbuffer.slang forward.slang ssgi.slang light_cull.slang

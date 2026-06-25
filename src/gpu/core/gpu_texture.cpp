@@ -145,10 +145,16 @@ static GpuResult gpuCreateTextureViewInternal(
     if (type == GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL) {
         viewDesc.aspect = rhi::TextureAspect::DepthOnly;
     } else if (type == GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE || type == GPU_TEXTURE_VIEW_TYPE_UNORDERED_ACCESS) {
-        // For depth textures used as SRV, still need DepthOnly aspect
         auto fmt = tex->getDesc().format;
-        if (fmt == rhi::Format::D32Float || fmt == rhi::Format::D16Unorm || fmt == rhi::Format::D32FloatS8Uint) {
+        if (fmt == rhi::Format::D32Float) {
             viewDesc.aspect = rhi::TextureAspect::DepthOnly;
+            viewDesc.format = rhi::Format::R32Float;
+        } else if (fmt == rhi::Format::D16Unorm) {
+            viewDesc.aspect = rhi::TextureAspect::DepthOnly;
+            viewDesc.format = rhi::Format::R16Unorm;
+        } else if (fmt == rhi::Format::D32FloatS8Uint) {
+            viewDesc.aspect = rhi::TextureAspect::DepthOnly;
+            viewDesc.format = rhi::Format::R32Float;
         }
     } else {
         viewDesc.aspect = rhi::TextureAspect::All;

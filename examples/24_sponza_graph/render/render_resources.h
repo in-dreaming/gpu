@@ -43,7 +43,7 @@ struct RenderResources {
     GpuBufferHandle lightBuffer = GPU_NULL_HANDLE;
 
     // Per-frame camera data (uploaded as constant buffer)
-    GpuBufferHandle cameraBuffer = GPU_NULL_HANDLE;
+    GpuBufferHandle cascadeMatrixBuffer = GPU_NULL_HANDLE;
 
     // Light cull output
     GpuBufferHandle lightIndexBuffer = GPU_NULL_HANDLE;

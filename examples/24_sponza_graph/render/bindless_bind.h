@@ -34,6 +34,25 @@ inline bool shaderCursorSetBinding(rhi::ShaderCursor cursor, const char* field, 
     return true;
 }
 
+inline bool shaderCursorSetBinding(rhi::ShaderCursor cursor, const char* field, rhi::IBuffer* buffer,
+                                   const char* debugName = nullptr)
+{
+    if (!buffer) {
+        if (debugName) printf("Binding failed: '%s' buffer is null\n", debugName);
+        return false;
+    }
+    rhi::ShaderCursor fieldCursor = cursor[field];
+    if (!fieldCursor.isValid()) {
+        if (debugName) printf("Binding failed: shader field '%s' not found\n", debugName);
+        return false;
+    }
+    if (SLANG_FAILED(fieldCursor.setBinding(rhi::Binding(buffer)))) {
+        if (debugName) printf("Binding failed: setBinding('%s') returned error\n", debugName);
+        return false;
+    }
+    return true;
+}
+
 inline bool shaderCursorSetBinding(rhi::ShaderCursor cursor, const char* field, rhi::ISampler* sampler,
                                    const char* debugName = nullptr)
 {

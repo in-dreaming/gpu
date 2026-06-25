@@ -95,13 +95,14 @@ bool initRenderResources(RenderResources& r, uint32_t w, uint32_t h, uint32_t ma
         if (gpuCreateBuffer(r.device, &bd, &r.lightBuffer) != GPU_SUCCESS) return false;
     }
 
-    // Camera buffer
+    // Cascade view-proj matrices for forward shadow sampling (4 x float4x4)
     {
         GpuBufferDesc bd = {};
-        bd.size = sizeof(CameraParams);
-        bd.usage = GPU_BUFFER_USAGE_CONSTANT_BUFFER | GPU_BUFFER_USAGE_COPY_DEST;
-        bd.label = "camera_buffer";
-        if (gpuCreateBuffer(r.device, &bd, &r.cameraBuffer) != GPU_SUCCESS) return false;
+        bd.size = sizeof(float) * 16 * 4;
+        bd.elementSize = sizeof(float) * 16;
+        bd.usage = GPU_BUFFER_USAGE_SHADER_RESOURCE | GPU_BUFFER_USAGE_COPY_DEST;
+        bd.label = "cascade_matrix_buffer";
+        if (gpuCreateBuffer(r.device, &bd, &r.cascadeMatrixBuffer) != GPU_SUCCESS) return false;
     }
 
     // Light index buffer (culling output)
@@ -150,7 +151,7 @@ bool initRenderResources(RenderResources& r, uint32_t w, uint32_t h, uint32_t ma
         td.arrayLength = 1; td.mipCount = 1;
         td.format = GPU_FORMAT_D32_FLOAT;
         td.sampleCount = 1;
-        td.usage = GPU_TEXTURE_USAGE_DEPTH_STENCIL | GPU_TEXTURE_USAGE_SHADER_RESOURCE;
+        td.usage = GPU_TEXTURE_USAGE_DEPTH_STENCIL | GPU_TEXTURE_USAGE_SHADER_RESOURCE | GPU_TEXTURE_USAGE_COPY_SOURCE;
         char label[64]; snprintf(label, sizeof(label), "cascade_%d", i); td.label = label;
         if (gpuCreateTexture(r.device, &td, &r.cascadeDepth[i]) != GPU_SUCCESS) return false;
         gpuCreateTextureView(r.device, r.cascadeDepth[i], GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &r.cascadeDepthView[i]);
@@ -406,7 +407,7 @@ void recreateGBuffer(RenderResources& r, uint32_t w, uint32_t h) {
         td.arrayLength = 1; td.mipCount = 1;
         td.format = GPU_FORMAT_D32_FLOAT;
         td.sampleCount = 1;
-        td.usage = GPU_TEXTURE_USAGE_DEPTH_STENCIL | GPU_TEXTURE_USAGE_SHADER_RESOURCE;
+        td.usage = GPU_TEXTURE_USAGE_DEPTH_STENCIL | GPU_TEXTURE_USAGE_SHADER_RESOURCE | GPU_TEXTURE_USAGE_COPY_SOURCE;
         td.label = "scene_depth";
         if (gpuCreateTexture(r.device, &td, &r.sceneDepth) == GPU_SUCCESS) {
             gpuCreateTextureView(r.device, r.sceneDepth, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &r.sceneDepthDsv);
@@ -450,7 +451,7 @@ void destroyRenderResources(RenderResources& r) {
     destroy(r.vertexBuffer, gpuDestroyBuffer);
     destroy(r.indexBuffer, gpuDestroyBuffer);
     destroy(r.lightBuffer, gpuDestroyBuffer);
-    destroy(r.cameraBuffer, gpuDestroyBuffer);
+    destroy(r.cascadeMatrixBuffer, gpuDestroyBuffer);
     destroy(r.lightIndexBuffer, gpuDestroyBuffer);
 
     destroy(r.ssgiOutputUav, gpuDestroyTextureView);

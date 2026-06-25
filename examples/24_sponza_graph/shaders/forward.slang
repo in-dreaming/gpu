@@ -54,11 +54,8 @@ struct ForwardParams
 {
     CameraParams camera;
     ForwardFeatureFlags features;
-    uint2 padAfterFeatures;
-    float4x4 cascadeViewProj[4];
     uint baseColorLayerCount;
     uint pad0;
-    uint2 padBeforeLighting;
     ForwardLighting lighting;
     ShadowCascadeData cascades[4];
     uint screenWidth;
@@ -66,7 +63,16 @@ struct ForwardParams
     uint debugViewMode;
 };
 
-// Must match RenderViewMode in core/render_view_mode.h
+uint enableDirShadowFlag;
+uint enableDirLightFlag;
+
+StructuredBuffer<float4x4> cascadeViewProjs;
+float4 gCascadeSplitFar;
+float4 gCascadeTexelSize;
+float4 gCascadeWorldTexel;
+float4 gCascadeDepthBias;
+
+ParameterBlock<ForwardParams> gFwd;
 static const uint kViewFinal = 0u;
 static const uint kViewAlbedo = 1u;
 static const uint kViewAmbient = 2u;
@@ -82,16 +88,17 @@ static const uint kViewUV = 11u;
 static const uint kViewMaterial = 12u;
 static const uint kViewDirect = 13u;
 static const uint kViewLighting = 14u;
-
-ParameterBlock<ForwardParams> gFwd;
+static const uint kViewShadowMap = 15u;
+static const uint kViewShadowAtlas = 16u;
+static const uint kViewShadowUv = 17u;
 
 uniform Texture2DArray<float4> baseColorArray;
 SamplerState linearSampler;
-uniform Texture2D<float>.Handle shadowMap0;
-uniform Texture2D<float>.Handle shadowMap1;
-uniform Texture2D<float>.Handle shadowMap2;
-uniform Texture2D<float>.Handle shadowMap3;
-uniform SamplerComparisonState.Handle shadowSampler;
+uniform Texture2D<float> shadowMap0;
+uniform Texture2D<float> shadowMap1;
+uniform Texture2D<float> shadowMap2;
+uniform Texture2D<float> shadowMap3;
+SamplerComparisonState shadowSampler;
 uniform StructuredBuffer<PointLightData>.Handle pointLights;
 uniform Texture2D<float4>.Handle ssgiTexture;
 uniform SamplerState.Handle ssgiSampler;
@@ -103,11 +110,7 @@ struct VSOut
     float2 uv : TEXCOORD0;
     float material : MATERIAL;
     float viewDepth : TEXCOORD1;
-    float4 shadowPos0 : TEXCOORD2;
-    float4 shadowPos1 : TEXCOORD3;
-    float4 shadowPos2 : TEXCOORD4;
-    float4 shadowPos3 : TEXCOORD5;
-    float3 worldPos : TEXCOORD6;
+    float3 worldPos : TEXCOORD2;
 };
 
 float3 safeNormalize(float3 v)
@@ -134,79 +137,126 @@ VSOut vertexMain(
     output.material = material;
     output.viewDepth = vz;
     output.worldPos = position;
-
-    output.shadowPos0 = mul(gFwd.cascadeViewProj[0], float4(position, 1.0));
-    output.shadowPos1 = mul(gFwd.cascadeViewProj[1], float4(position, 1.0));
-    output.shadowPos2 = mul(gFwd.cascadeViewProj[2], float4(position, 1.0));
-    output.shadowPos3 = mul(gFwd.cascadeViewProj[3], float4(position, 1.0));
     return output;
 }
 
-float sampleDirShadowMapCmp(int cascadeIndex, float2 uv, float compareDepth)
+static const uint kShadowMapResolution = 2048u;
+
+float sampleShadowMapDepth(int cascadeIndex, int2 texel)
 {
+    texel = clamp(texel, int2(0, 0), int2((int)kShadowMapResolution - 1, (int)kShadowMapResolution - 1));
     switch (cascadeIndex)
     {
-    case 0: return shadowMap0.SampleCmpLevelZero(shadowSampler, uv, compareDepth);
-    case 1: return shadowMap1.SampleCmpLevelZero(shadowSampler, uv, compareDepth);
-    case 2: return shadowMap2.SampleCmpLevelZero(shadowSampler, uv, compareDepth);
-    default: return shadowMap3.SampleCmpLevelZero(shadowSampler, uv, compareDepth);
+    case 0: return shadowMap0.Load(int3(texel, 0));
+    case 1: return shadowMap1.Load(int3(texel, 0));
+    case 2: return shadowMap2.Load(int3(texel, 0));
+    default: return shadowMap3.Load(int3(texel, 0));
     }
 }
 
-float computeDirShadowPCF(float4 shadowClip, float texelSize, int cascadeIndex, float3 normal, float3 lightDir)
+float sampleShadowMapDepthUv(int cascadeIndex, float2 uv)
 {
+    int2 texel = int2(uv * (float)kShadowMapResolution);
+    return sampleShadowMapDepth(cascadeIndex, texel);
+}
+
+float pickCascadeWorldTexel(int cascadeIndex)
+{
+    switch (cascadeIndex)
+    {
+    case 0: return gCascadeWorldTexel.x;
+    case 1: return gCascadeWorldTexel.y;
+    case 2: return gCascadeWorldTexel.z;
+    default: return gCascadeWorldTexel.w;
+    }
+}
+
+float pickCascadeDepthBiasNdc(int cascadeIndex)
+{
+    switch (cascadeIndex)
+    {
+    case 0: return gCascadeDepthBias.x;
+    case 1: return gCascadeDepthBias.y;
+    case 2: return gCascadeDepthBias.z;
+    default: return gCascadeDepthBias.w;
+    }
+}
+
+float compareShadowDepth(float mapDepth, float compareDepth, float bias)
+{
+    return (compareDepth > mapDepth - bias) ? 0.0 : 1.0;
+}
+
+float sampleShadowCmp(int cascadeIndex, float2 uv, float compareDepth, float bias)
+{
+    float mapDepth = sampleShadowMapDepthUv(cascadeIndex, uv);
+    return compareShadowDepth(mapDepth, compareDepth, bias);
+}
+
+float computeDirShadowPCF(float4 shadowClip, float depthBiasNdc, int cascadeIndex, float3 normal, float3 lightDir)
+{
+    float ndotl = saturate(dot(normal, lightDir));
+    if (ndotl < 0.01)
+        return 1.0;
+
     float3 ndc = shadowClip.xyz / max(shadowClip.w, 1e-5);
     if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0)
         return 1.0;
     float2 uv = ndc.xy * 0.5 + 0.5;
     uv.y = 1.0 - uv.y;
 
-    float ndotl = saturate(dot(normal, lightDir));
-    float bias = 0.0004 + 0.0025 * (1.0 - ndotl) + texelSize * 1.5;
-
-    float shadow = 0.0;
-    for (int y = -1; y <= 1; y++)
-    {
-        for (int x = -1; x <= 1; x++)
-        {
-            float2 offset = float2((float)x, (float)y) * texelSize;
-            shadow += sampleDirShadowMapCmp(cascadeIndex, uv + offset, ndc.z - bias);
-        }
-    }
-    return shadow / 9.0;
+    float slopeScale = 1.0 - ndotl;
+    float bias = depthBiasNdc * (1.0 + slopeScale * 2.0);
+    return sampleShadowCmp(cascadeIndex, uv, ndc.z, bias);
 }
 
-float evaluateDirShadow(float4 shadowPos[4], float viewDepth, float3 normal, float3 lightDir)
+float pickCascadeTexelSize(int cascadeIndex)
 {
-    int ci = 0;
-    for (int i = 0; i < 4; i++)
+    switch (cascadeIndex)
     {
-        if (viewDepth <= gFwd.cascades[i].splitFar)
-        {
-            ci = i;
-            break;
-        }
-        ci = 3;
+    case 0: return gCascadeTexelSize.x;
+    case 1: return gCascadeTexelSize.y;
+    case 2: return gCascadeTexelSize.z;
+    default: return gCascadeTexelSize.w;
     }
+}
 
-    float4 clip = shadowPos[ci];
-    float3 ndc = clip.xyz / max(clip.w, 1e-5);
-    if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0)
+float4 shadowClipFromWorld(float3 worldPos, int cascadeIndex)
+{
+    switch (cascadeIndex)
     {
-        for (int j = 0; j < 4; j++)
-        {
-            float3 altNdc = shadowPos[j].xyz / max(shadowPos[j].w, 1e-5);
-            if (altNdc.x >= -1.0 && altNdc.x <= 1.0 && altNdc.y >= -1.0 && altNdc.y <= 1.0 &&
-                altNdc.z >= 0.0 && altNdc.z <= 1.0)
-            {
-                ci = j;
-                clip = shadowPos[j];
-                break;
-            }
-        }
+    case 0: return mul(float4(worldPos, 1.0), cascadeViewProjs[0]);
+    case 1: return mul(float4(worldPos, 1.0), cascadeViewProjs[1]);
+    case 2: return mul(float4(worldPos, 1.0), cascadeViewProjs[2]);
+    default: return mul(float4(worldPos, 1.0), cascadeViewProjs[3]);
     }
+}
 
-    return computeDirShadowPCF(clip, gFwd.cascades[ci].texelSize, ci, normal, lightDir);
+int pickCascadeIndex(float viewDepth)
+{
+    if (viewDepth <= gCascadeSplitFar.x)
+        return 0;
+    if (viewDepth <= gCascadeSplitFar.y)
+        return 1;
+    if (viewDepth <= gCascadeSplitFar.z)
+        return 2;
+    return 3;
+}
+
+float evaluateDirShadow(VSOut input, float3 n, float3 lightDir, float viewDepth, float materialLayer)
+{
+    if (materialLayer >= 0.5)
+        return 1.0;
+
+    float ndotl = saturate(dot(n, lightDir));
+    if (ndotl < 0.01)
+        return 1.0;
+
+    int cascadeIndex = pickCascadeIndex(viewDepth);
+    float depthBiasNdc = pickCascadeDepthBiasNdc(cascadeIndex);
+    float3 samplePos = input.worldPos;
+    float4 shadowClip = shadowClipFromWorld(samplePos, cascadeIndex);
+    return computeDirShadowPCF(shadowClip, depthBiasNdc, cascadeIndex, n, lightDir);
 }
 
 float3 evalPointLights(float3 albedo, float3 n, float3 worldPos)
@@ -259,15 +309,12 @@ float4 fragmentMain(VSOut input) : SV_Target
     float3 lightDir = safeNormalize(-gFwd.lighting.dirLightDir);
     float ndl = saturate(dot(n, lightDir));
     float dirShadow = 1.0;
-    if (gFwd.features.enableDirShadow != 0u)
-    {
-        float4 shadowPos[4] = { input.shadowPos0, input.shadowPos1, input.shadowPos2, input.shadowPos3 };
-        dirShadow = evaluateDirShadow(shadowPos, input.viewDepth, n, lightDir);
-    }
+    if (enableDirShadowFlag != 0u)
+        dirShadow = evaluateDirShadow(input, n, lightDir, input.viewDepth, layer);
 
     float3 diffuseTerm = float3(0.0, 0.0, 0.0);
     float3 specularTerm = float3(0.0, 0.0, 0.0);
-    if (gFwd.features.enableDirLight != 0u)
+    if (enableDirLightFlag != 0u)
     {
         diffuseTerm = albedo * gFwd.lighting.dirLightColor * gFwd.lighting.dirLightIntensity * ndl * dirShadow;
         float3 halfDir = safeNormalize(lightDir + viewDir);
@@ -289,7 +336,7 @@ float4 fragmentMain(VSOut input) : SV_Target
         color = lerp(color, float3(0.055, 0.065, 0.085), fog);
     }
 
-    color = max(color, albedo * 0.22);
+    color = max(color, albedo * 0.02);
 
     uint mode = gFwd.debugViewMode;
     if (mode == kViewAlbedo)
@@ -305,7 +352,12 @@ float4 fragmentMain(VSOut input) : SV_Target
     else if (mode == kViewSSGI)
         color = giTerm;
     else if (mode == kViewShadow)
-        color = float3(dirShadow, dirShadow, dirShadow);
+    {
+        if (enableDirShadowFlag == 0u)
+            color = float3(1.0, 0.0, 1.0);
+        else
+            color = float3(dirShadow, dirShadow, dirShadow);
+    }
     else if (mode == kViewNormal)
         color = n * 0.5 + 0.5;
     else if (mode == kViewDepth)
@@ -326,9 +378,56 @@ float4 fragmentMain(VSOut input) : SV_Target
         color = float3(frac(t), frac(t * 2.13), frac(t * 4.71));
     }
     else if (mode == kViewDirect)
-        color = max(diffuseTerm + pointTerm, albedo * 0.22);
+        color = diffuseTerm + pointTerm;
     else if (mode == kViewLighting)
-        color = max(ambientTerm + diffuseTerm + pointTerm, albedo * 0.22);
+        color = ambientTerm + diffuseTerm + pointTerm;
+    else if (mode == kViewShadowMap)
+    {
+        if (gFwd.features.enableDirShadow == 0u && enableDirShadowFlag == 0u)
+        {
+            color = float3(1.0, 0.0, 1.0);
+        }
+        else
+        {
+            int cascadeIndex = pickCascadeIndex(input.viewDepth);
+            float4 shadowClip = shadowClipFromWorld(input.worldPos, cascadeIndex);
+            float3 ndc = shadowClip.xyz / max(shadowClip.w, 1e-5);
+            float2 uv = ndc.xy * 0.5 + 0.5;
+            uv.y = 1.0 - uv.y;
+            bool inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 && ndc.y >= -1.0 && ndc.y <= 1.0 &&
+                            ndc.z >= 0.0 && ndc.z <= 1.0;
+            float mapDepth = 0.0;
+            if (inBounds)
+            {
+                int2 texel = int2(uv * (float)kShadowMapResolution);
+                mapDepth = sampleShadowMapDepth(cascadeIndex, texel);
+            }
+            color = inBounds ? float3(mapDepth, mapDepth, mapDepth) : float3(1.0, 0.0, 0.0);
+        }
+    }
+    else if (mode == kViewShadowAtlas)
+    {
+        if (enableDirShadowFlag == 0u)
+            color = float3(1.0, 0.0, 1.0);
+        else
+        {
+            float2 atlasUv = input.position.xy / float2((float)gFwd.screenWidth, (float)gFwd.screenHeight);
+            int2 texel = int2(atlasUv * 2048.0);
+            float d = sampleShadowMapDepth(0, texel);
+            color = float3(d, d, d);
+        }
+    }
+    else if (mode == kViewShadowUv)
+    {
+        int cascadeIndex = pickCascadeIndex(input.viewDepth);
+        float4 shadowClip = shadowClipFromWorld(input.worldPos, cascadeIndex);
+        float3 ndc = shadowClip.xyz / max(shadowClip.w, 1e-5);
+        float2 uv = ndc.xy * 0.5 + 0.5;
+        uv.y = 1.0 - uv.y;
+        bool inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 && ndc.y >= -1.0 && ndc.y <= 1.0 &&
+                        ndc.z >= 0.0 && ndc.z <= 1.0;
+        color = inBounds ? float3(uv.x, uv.y, ndc.z) : float3(1.0, 0.0, 0.0);
+    }
 
     return float4(color, 1.0);
 }

@@ -15,4 +15,5 @@ struct MaterialTextures {
 };
 
 bool createSponzaMaterialTextures(GpuDevice device, const char* root, SponzaScene& scene, MaterialTextures& out);
+bool createSimpleMaterialTextures(GpuDevice device, MaterialTextures& out);
 void destroySponzaMaterialTextures(GpuDevice device, MaterialTextures& tex);

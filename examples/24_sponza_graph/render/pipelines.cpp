@@ -64,7 +64,9 @@ bool createDemoPipelines(GpuDevice device, DemoPipelines& p, GpuFormat surfaceFo
         spd.depthStencil.depthTestEnable = true;
         spd.depthStencil.depthWriteEnable = true;
         spd.depthStencil.depthFunc = ComparisonFunc::Less;
+        // Shadow pass: disable culling. Back+CCW drops lit-side faces under Vulkan viewport Y-flip.
         spd.rasterizer.cullMode = CullMode::None;
+        spd.rasterizer.frontFace = FrontFaceMode::CounterClockwise;
         spd.rasterizer.fillMode = FillMode::Solid;
         spd.label = "shadow_pipeline";
         if (SLANG_FAILED(rhiDevice->createRenderPipeline(spd, p.shadowPipeline.writeRef()))) {

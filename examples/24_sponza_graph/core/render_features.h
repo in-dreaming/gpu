@@ -23,6 +23,7 @@ inline void renderFeaturesSetBase(RenderFeatures& f)
 {
     f = {};
     f.dirLight = true;
+    f.dirShadows = true;
     f.fog = true;
     f.pointLightCount = 0;
 }
@@ -53,6 +54,10 @@ inline bool renderFeaturesParseToken(RenderFeatures& f, const char* token)
     }
     if (strcmp(token, "shadows") == 0 || strcmp(token, "dir-shadows") == 0) {
         f.dirShadows = true;
+        return true;
+    }
+    if (strcmp(token, "noshadows") == 0 || strcmp(token, "no-shadows") == 0) {
+        f.dirShadows = false;
         return true;
     }
     if (strcmp(token, "points") == 0) {
@@ -144,8 +149,9 @@ inline void renderFeaturesPrint(const RenderFeatures& f)
 inline void renderFeaturesPrintHelp()
 {
     printf("Feature flags (--features <csv>):\n");
-    printf("  base            directional + ambient only (default)\n");
+    printf("  base            directional + ambient + CSM shadows (default)\n");
     printf("  shadows         orthographic CSM for sun\n");
+    printf("  noshadows       disable CSM (debug views auto re-enable)\n");
     printf("  points          point lights (default 1024, or points=N)\n");
     printf("  point-shadows   point lights + cube shadows\n");
     printf("  gbuffer         albedo/normal/depth prepass\n");

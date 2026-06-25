@@ -70,6 +70,11 @@ struct FrameData {
     RenderFeatures features = {};
     RenderViewMode viewMode = RenderViewMode::Final;
 
+    bool diagShadow = false;
+    uint32_t diagShadowPasses = 0;
+    uint32_t diagShadowDraws = 0;
+    bool diagForwardUniformOk = false;
+
     rhi::ComPtr<rhi::IBuffer> rhiVertexBuffer;
     rhi::ComPtr<rhi::IBuffer> rhiIndexBuffer;
 };

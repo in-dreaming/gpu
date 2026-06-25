@@ -308,20 +308,24 @@ static GpuResourceState accessToState(GpuGraphAccess access, GpuGraphResourceKin
 static bool graphResourceIsDepthTexture(GpuDevice device, const GpuGraphResourceRecord& res)
 {
     if (!device || res.kind != GPU_GRAPH_RESOURCE_TEXTURE) return false;
-    if (res.imported && res.importedTexture.index) {
-        rhi::ITexture* tex = device->texturePool.resolve(
-            res.importedTexture.index, res.importedTexture.generation);
-        if (tex) {
-            return (tex->getDesc().usage & rhi::TextureUsage::DepthStencil) != rhi::TextureUsage::None;
-        }
+    GpuTextureHandle tex = res.imported ? res.importedTexture : res.realizedTexture;
+    if (!gpuHandleIsValid(tex)) return false;
+    rhi::ITexture* rhiTex = device->texturePool.resolve(tex.index, tex.generation);
+    if (!rhiTex) return false;
+    switch (rhiTex->getDesc().format) {
+    case rhi::Format::D32Float:
+    case rhi::Format::D16Unorm:
+    case rhi::Format::D32FloatS8Uint:
+        return true;
+    default:
+        return false;
     }
-    return (res.textureDesc.usage & GPU_TEXTURE_USAGE_DEPTH_STENCIL) != 0;
 }
 
 static GpuResourceState graphReadStateForResource(GpuDevice device, const GpuGraphResourceRecord& res)
 {
-    if (res.kind == GPU_GRAPH_RESOURCE_TEXTURE && graphResourceIsDepthTexture(device, res))
-        return GPU_RESOURCE_STATE_DEPTH_READ;
+    // D3D12 depth textures must transition to DEPTH_READ before SRV sampling.
+    if (graphResourceIsDepthTexture(device, res)) return GPU_RESOURCE_STATE_DEPTH_READ;
     return GPU_RESOURCE_STATE_SHADER_RESOURCE;
 }
 
@@ -690,6 +694,23 @@ const char* gpuGraphGetPassName(GpuGraph graph, uint32_t passIndex)
 uint32_t gpuGraphGetPassCount(GpuGraph graph)
 {
     return graph ? (uint32_t)graph->passes.size() : 0;
+}
+
+uint32_t gpuGraphGetExecutionOrderCount(GpuGraph graph)
+{
+    return graph ? (uint32_t)graph->executionOrder.size() : 0;
+}
+
+uint32_t gpuGraphGetExecutionOrderPassIndex(GpuGraph graph, uint32_t sortedIndex)
+{
+    if (!graph || sortedIndex >= graph->executionOrder.size()) return UINT32_MAX;
+    return graph->executionOrder[sortedIndex];
+}
+
+bool gpuGraphIsPassCulled(GpuGraph graph, uint32_t passIndex)
+{
+    if (!graph || passIndex >= graph->passes.size()) return true;
+    return graph->passes[passIndex]->culled;
 }
 
 GpuResult gpuGraphExportDot(GpuGraph graph, const char* path)

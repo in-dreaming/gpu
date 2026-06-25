@@ -94,6 +94,9 @@ GpuBufferHandle gpuGraphGetBuffer(GpuGraph graph, GpuGraphResource resource);
 GpuGraphPassKind gpuGraphGetPassKind(GpuGraph graph, uint32_t passIndex);
 const char* gpuGraphGetPassName(GpuGraph graph, uint32_t passIndex);
 uint32_t gpuGraphGetPassCount(GpuGraph graph);
+uint32_t gpuGraphGetExecutionOrderCount(GpuGraph graph);
+uint32_t gpuGraphGetExecutionOrderPassIndex(GpuGraph graph, uint32_t sortedIndex);
+bool gpuGraphIsPassCulled(GpuGraph graph, uint32_t passIndex);
 
 GpuResult gpuGraphExportDot(GpuGraph graph, const char* path);
 GpuResult gpuGraphExportJson(GpuGraph graph, const char* path);

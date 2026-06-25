@@ -52,6 +52,7 @@ static void buildOrthographicProjection(float minX, float maxX, float minY, floa
     memset(out, 0, sizeof(float) * 16);
     out[0] = 2.0f / (maxX - minX);
     out[5] = 2.0f / (maxY - minY);
+    // Light-space z maps linearly to depth buffer [0, 1] (near light = smaller depth).
     out[10] = 1.0f / (maxZ - minZ);
     out[14] = -minZ / (maxZ - minZ);
     out[15] = 1.0f;
@@ -215,6 +216,7 @@ void computeOrthographicCascades(
         float maxExtent = std::max(extX, extY);
         minX = -maxExtent; maxX = maxExtent;
         minY = -maxExtent; maxY = maxExtent;
+        const float frustumDepthRange = std::max(maxZ - minZ, 1.0f);
         minZ -= 150.0f;
         maxZ += 400.0f;
 
@@ -240,6 +242,11 @@ void computeOrthographicCascades(
         memcpy(cascadesOut[ci].viewProj, viewProj, sizeof(viewProj));
         cascadesOut[ci].splitFar = splits[ci + 1];
         cascadesOut[ci].texelSize = 1.0f / (float)shadowMapSize;
+        const float worldExtent = maxExtent * 2.0f;
+        cascadesOut[ci].worldTexelSize = worldExtent / (float)shadowMapSize;
+        const float texelBias = 4.0f / (float)shadowMapSize;
+        const float slopeBias = (worldExtent / (float)shadowMapSize) / frustumDepthRange;
+        cascadesOut[ci].depthBiasNdc = std::max(texelBias, slopeBias);
     }
 }
 

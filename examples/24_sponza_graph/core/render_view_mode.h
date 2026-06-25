@@ -21,7 +21,16 @@ enum class RenderViewMode : uint32_t {
     Material = 12,
     Direct = 13, // dir diffuse + points, no ambient
     Lighting = 14, // ambient + dir + points, no ssgi/fog
+    ShadowMap = 15, // raw cascade depth sample at projected UV
+    ShadowAtlas = 16, // cascade0 texture mapped to screen (no light-space UV)
+    ShadowUv = 17, // projected shadow UV (RG), out-of-bounds red
 };
+
+inline bool renderViewModeNeedsDirShadows(RenderViewMode m)
+{
+    return m == RenderViewMode::Shadow || m == RenderViewMode::ShadowMap || m == RenderViewMode::ShadowAtlas ||
+           m == RenderViewMode::ShadowUv;
+}
 
 inline const char* renderViewModeName(RenderViewMode m)
 {
@@ -41,6 +50,9 @@ inline const char* renderViewModeName(RenderViewMode m)
     case RenderViewMode::Material: return "material";
     case RenderViewMode::Direct: return "direct";
     case RenderViewMode::Lighting: return "lighting";
+    case RenderViewMode::ShadowMap: return "shadowmap";
+    case RenderViewMode::ShadowAtlas: return "shadowatlas";
+    case RenderViewMode::ShadowUv: return "shadowuv";
     default: return "unknown";
     }
 }
@@ -83,6 +95,15 @@ inline bool renderViewModeParse(const char* token, RenderViewMode& out)
     if (strcmp(token, "lighting") == 0 || strcmp(token, "lit") == 0) {
         out = RenderViewMode::Lighting; return true;
     }
+    if (strcmp(token, "shadowmap") == 0 || strcmp(token, "shadow-map") == 0) {
+        out = RenderViewMode::ShadowMap; return true;
+    }
+    if (strcmp(token, "shadowatlas") == 0 || strcmp(token, "atlas") == 0) {
+        out = RenderViewMode::ShadowAtlas; return true;
+    }
+    if (strcmp(token, "shadowuv") == 0 || strcmp(token, "suv") == 0) {
+        out = RenderViewMode::ShadowUv; return true;
+    }
     return false;
 }
 
@@ -104,6 +125,9 @@ inline void renderViewModePrintHelp()
     printf("  material    material index heatmap\n");
     printf("  direct      dir + points, no ambient\n");
     printf("  lighting    ambient + dir + points, no gi/fog\n");
+    printf("  shadowmap   projected cascade depth (auto-enables shadows)\n");
+    printf("  shadowatlas cascade0 depth texture on screen (auto-enables shadows)\n");
+    printf("  shadowuv    projected shadow UV / out-of-bounds (auto-enables shadows)\n");
     printf("Examples:\n");
     printf("  24_sponza_graph --features base,nofog --view-mode albedo\n");
     printf("  24_sponza_graph --features base,nofog --view-mode ambient\n");
@@ -118,13 +142,13 @@ inline void renderViewModePrint(RenderViewMode m)
 
 inline RenderViewMode renderViewModeNext(RenderViewMode m)
 {
-    uint32_t n = ((uint32_t)m + 1u) % 15u;
+    uint32_t n = ((uint32_t)m + 1u) % 18u;
     return (RenderViewMode)n;
 }
 
 inline RenderViewMode renderViewModePrev(RenderViewMode m)
 {
     uint32_t n = (uint32_t)m;
-    n = (n == 0u) ? 14u : (n - 1u);
+    n = (n == 0u) ? 17u : (n - 1u);
     return (RenderViewMode)n;
 }

@@ -10,6 +10,8 @@ struct CascadeShadowData {
     float viewProj[16];
     float splitFar;
     float texelSize;
+    float worldTexelSize;
+    float depthBiasNdc;
 };
 
 void mat4Multiply(const float* a, const float* b, float* out);

@@ -78,6 +78,125 @@ static void fillFallbackLayer(uint8_t* dst, uint32_t w, uint32_t h, uint32_t mi)
         }
 }
 
+static void fillSolidLayer(uint8_t* dst, uint32_t w, uint32_t h, uint8_t r, uint8_t g, uint8_t b)
+{
+    for (uint32_t y = 0; y < h; ++y)
+        for (uint32_t x = 0; x < w; ++x) {
+            uint8_t* p = dst + ((size_t)y * w + x) * 4;
+            p[0] = r;
+            p[1] = g;
+            p[2] = b;
+            p[3] = 255;
+        }
+}
+
+static void fillCheckerLayer(uint8_t* dst, uint32_t w, uint32_t h, uint8_t r0, uint8_t g0, uint8_t b0, uint8_t r1,
+                             uint8_t g1, uint8_t b1, uint32_t cell)
+{
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            bool alt = ((x / cell) + (y / cell)) % 2;
+            uint8_t* p = dst + ((size_t)y * w + x) * 4;
+            p[0] = alt ? r1 : r0;
+            p[1] = alt ? g1 : g0;
+            p[2] = alt ? b1 : b0;
+            p[3] = 255;
+        }
+    }
+}
+
+static bool createMaterialTextureArray(GpuDevice device, const std::vector<uint8_t>& px, uint32_t layerCount,
+                                       uint32_t layerSize, MaterialTextures& out, const char* label)
+{
+    rhi::SamplerDesc sd = {};
+    sd.minFilter = rhi::TextureFilteringMode::Linear;
+    sd.magFilter = rhi::TextureFilteringMode::Linear;
+    sd.mipFilter = rhi::TextureFilteringMode::Linear;
+    sd.addressU = rhi::TextureAddressingMode::Wrap;
+    sd.addressV = rhi::TextureAddressingMode::Wrap;
+    sd.addressW = rhi::TextureAddressingMode::ClampToEdge;
+    sd.label = "material_sampler";
+    rhi::ComPtr<rhi::ISampler> sampler;
+    if (SLANG_FAILED(device->rhiDevice->createSampler(sd, sampler.writeRef()))) return false;
+
+    rhi::TextureDesc rhiTd = {};
+    rhiTd.type = rhi::TextureType::Texture2DArray;
+    rhiTd.size = {layerSize, layerSize, 1u};
+    rhiTd.arrayLength = layerCount;
+    rhiTd.mipCount = 1;
+    rhiTd.format = rhi::Format::RGBA8UnormSrgb;
+    rhiTd.usage = rhi::TextureUsage::ShaderResource;
+    rhiTd.defaultState = rhi::ResourceState::ShaderResource;
+    rhiTd.sampler = sampler;
+    rhiTd.label = label;
+
+    std::vector<rhi::SubresourceData> subs(layerCount);
+    size_t lbs = (size_t)layerSize * layerSize * 4;
+    for (uint32_t i = 0; i < layerCount; ++i)
+        subs[i] = {px.data() + (size_t)i * lbs, (size_t)(layerSize * 4), lbs};
+
+    rhi::ComPtr<rhi::ITexture> rhiTex;
+    if (SLANG_FAILED(device->rhiDevice->createTexture(rhiTd, subs.data(), rhiTex.writeRef())) || !rhiTex)
+        return false;
+
+    GpuTextureDesc td = {};
+    td.type = GPU_TEXTURE_TYPE_2D;
+    td.width = layerSize;
+    td.height = layerSize;
+    td.depth = 1;
+    td.arrayLength = layerCount;
+    td.mipCount = 1;
+    td.format = GPU_FORMAT_RGBA8_UNORM_SRGB;
+    td.usage = GPU_TEXTURE_USAGE_SHADER_RESOURCE;
+    td.label = label;
+    if (gpuCreateTexture(device, &td, &out.baseColorArray) != GPU_SUCCESS) return false;
+
+    rhi::ITexture* dummy = device->texturePool.resolve(out.baseColorArray.index, out.baseColorArray.generation);
+    if (dummy) dummy->release();
+    device->texturePool.slots[out.baseColorArray.index].ptr = rhiTex.detach();
+
+    if (gpuCreateTextureView(device, out.baseColorArray, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &out.baseColorView) !=
+        GPU_SUCCESS)
+        return false;
+
+    {
+        rhi::ITexture* tex = device->texturePool.resolve(out.baseColorArray.index, out.baseColorArray.generation);
+        if (!tex) return false;
+        rhi::TextureViewDesc viewDesc = {};
+        viewDesc.sampler = sampler;
+        viewDesc.label = "material_array_view";
+        rhi::ComPtr<rhi::ITextureView> arrayView;
+        if (SLANG_FAILED(tex->createView(viewDesc, arrayView.writeRef())) || !arrayView) return false;
+        gpuDestroyTextureView(device, out.baseColorView);
+        uint32_t viewIdx = device->textureViewPool.allocate(arrayView.detach());
+        if (viewIdx == 0) return false;
+        out.baseColorView.index = viewIdx;
+        out.baseColorView.generation = device->textureViewPool.slots[viewIdx].generation;
+    }
+
+    out.layerSize = layerSize;
+    out.layerCount = layerCount;
+    return true;
+}
+
+bool createSimpleMaterialTextures(GpuDevice device, MaterialTextures& out)
+{
+    constexpr uint32_t ls = 256;
+    constexpr uint32_t lc = 2;
+    std::vector<uint8_t> px((size_t)lc * ls * ls * 4);
+
+    fillCheckerLayer(px.data() + 0 * ls * ls * 4, ls, ls, 210, 210, 215, 120, 120, 128, 64);
+    fillSolidLayer(px.data() + 1 * ls * ls * 4, ls, ls, 210, 95, 75);
+
+    if (!createMaterialTextureArray(device, px, lc, ls, out, "simple_texarray")) {
+        printf("Simple texture array failed\n");
+        return false;
+    }
+    out.loadedBaseColorCount = lc;
+    printf("Simple textures: %u solid/checker layers\n", lc);
+    return true;
+}
+
 bool createSponzaMaterialTextures(GpuDevice device, const char* root, SponzaScene& scene, MaterialTextures& out) {
     constexpr uint32_t ls = 512;
     uint32_t lc = (uint32_t)std::max<size_t>(scene.materials.size(), 1);

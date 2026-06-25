@@ -1,6 +1,9 @@
 #include "pass_callbacks.h"
 #include "render/frame_data.h"
+#include "render/pass_bindings.h"
+#include "render/bindless_bind.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/core/gpu_buffer.h"
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -42,6 +45,52 @@ static void setCommonRenderState(GpuGraphPassContext* ctx, FrameData* d)
     ctx->renderPass->rhiPassEncoder->setRenderState(st);
 }
 
+static bool bindCascadeMatrixBuffer(ShaderCursor& c, FrameData* d, const char* debugName)
+{
+    if (!d->device || !d->resources || !gpuHandleIsValid(d->resources->cascadeMatrixBuffer)) return false;
+    auto* rhiBuf = static_cast<rhi::IBuffer*>(d->device->bufferPool.resolve(
+        d->resources->cascadeMatrixBuffer.index, d->resources->cascadeMatrixBuffer.generation));
+    return shaderCursorSetBinding(c, "cascadeViewProjs", rhiBuf, debugName);
+}
+
+static bool uploadCascadeMatrixBuffer(FrameData* d)
+{
+    if (!d->device || !d->resources || !gpuHandleIsValid(d->resources->cascadeMatrixBuffer)) return false;
+    float matrices[16 * 4] = {};
+    for (int ci = 0; ci < 4; ci++)
+        memcpy(matrices + ci * 16, d->cascadeShadows[ci].viewProj, sizeof(float) * 16);
+    return gpuUploadToBuffer(d->device, d->resources->cascadeMatrixBuffer, matrices, sizeof(matrices), 0) ==
+           GPU_SUCCESS;
+}
+
+static bool uploadAndBindCascadeMatrices(ShaderCursor& c, FrameData* d)
+{
+    if (!uploadCascadeMatrixBuffer(d)) return false;
+    return bindCascadeMatrixBuffer(c, d, d->diagShadow ? "cascadeViewProjs" : nullptr);
+}
+
+static bool uploadCascadeUniforms(ShaderCursor& c, FrameData* d)
+{
+    if (!uploadAndBindCascadeMatrices(c, d)) return false;
+    float splitFar[4] = {};
+    float texelSize[4] = {};
+    for (int ci = 0; ci < 4; ci++) {
+        splitFar[ci] = d->cascadeShadows[ci].splitFar;
+        texelSize[ci] = d->cascadeShadows[ci].texelSize;
+    }
+    if (SLANG_FAILED(c["gCascadeSplitFar"].setData(splitFar))) return false;
+    if (SLANG_FAILED(c["gCascadeTexelSize"].setData(texelSize))) return false;
+    float worldTexel[4] = {};
+    float depthBias[4] = {};
+    for (int ci = 0; ci < 4; ci++) {
+        worldTexel[ci] = d->cascadeShadows[ci].worldTexelSize;
+        depthBias[ci] = d->cascadeShadows[ci].depthBiasNdc;
+    }
+    if (SLANG_FAILED(c["gCascadeWorldTexel"].setData(worldTexel))) return false;
+    if (SLANG_FAILED(c["gCascadeDepthBias"].setData(depthBias))) return false;
+    return true;
+}
+
 static bool updateForwardPassUniforms(ShaderCursor& c, FrameData* d)
 {
     ShaderCursor fwd = c["gFwd"];
@@ -61,6 +110,14 @@ static bool updateForwardPassUniforms(ShaderCursor& c, FrameData* d)
     uint32_t layerCount = d->materials ? d->materials->layerCount : 1u;
     if (SLANG_FAILED(fwd["baseColorLayerCount"].setData(layerCount))) return false;
 
+    if (SLANG_FAILED(c["enableDirShadowFlag"].setData(d->features.dirShadows ? 1u : 0u))) return false;
+    if (SLANG_FAILED(c["enableDirLightFlag"].setData(d->features.dirLight ? 1u : 0u))) return false;
+    if (!uploadCascadeUniforms(c, d)) return false;
+    if (d->diagShadow) {
+        printf("[diag] cascade0 viewProj[0]=%.6f splitFar=%.1f\n",
+               d->cascadeShadows[0].viewProj[0], d->cascadeShadows[0].splitFar);
+    }
+
     ForwardLightingCpu lighting = {};
     memcpy(lighting.dirLightDir, d->dirLightDir, sizeof(lighting.dirLightDir));
     lighting.dirLightIntensity = d->dirLightIntensity;
@@ -75,14 +132,13 @@ static bool updateForwardPassUniforms(ShaderCursor& c, FrameData* d)
     }
 
     for (int ci = 0; ci < 4; ci++) {
-        if (!d->features.dirShadows) continue;
-        if (SLANG_FAILED(fwd["cascadeViewProj"][ci].setData(d->cascadeShadows[ci].viewProj))) return false;
         ForwardCascadeUniforms cd = {};
         cd.splitFar = d->cascadeShadows[ci].splitFar;
         cd.texelSize = d->cascadeShadows[ci].texelSize;
         if (SLANG_FAILED(fwd["cascades"][ci].setData(cd))) return false;
     }
 
+    if (d->diagShadow) d->diagForwardUniformOk = true;
     return true;
 }
 
@@ -109,15 +165,21 @@ void shadowPassCallback(GpuGraphPassContext* ctx, void* userData)
     FrameData* d = passData ? passData->frame : nullptr;
     if (!d || !ctx->renderPass || !d->pipelines->shadowPipeline || !d->pipelines->shadowRootObj) return;
 
+    if (d->diagShadow) d->diagShadowPasses++;
+
     rhi::IRenderPassEncoder* rpEnc = ctx->renderPass->rhiPassEncoder;
     uint32_t shadowSize = (passData->type == ShadowPassType::Cascade) ? kShadowMapSize : kPointShadowMapSize;
 
     {
         ShaderCursor c(d->pipelines->shadowRootObj);
-        if (passData->type == ShadowPassType::Cascade)
-            c["shadowViewProj"].setData(d->cascadeShadows[passData->cascadeIndex].viewProj);
-        else
+        if (passData->type == ShadowPassType::Cascade) {
+            if (!uploadCascadeMatrixBuffer(d)) return;
+            if (!bindCascadeMatrixBuffer(c, d, d->diagShadow ? "shadowCascadeViewProjs" : nullptr)) return;
+            if (SLANG_FAILED(c["shadowCascadeIndex"].setData((uint32_t)passData->cascadeIndex))) return;
+        } else {
+            if (SLANG_FAILED(c["shadowCascadeIndex"].setData(4u))) return;
             c["shadowViewProj"].setData(d->pointShadowViewProj[passData->pointShadowSlot][passData->cubeFace]);
+        }
     }
 
     rpEnc->bindPipeline(d->pipelines->shadowPipeline, d->pipelines->shadowRootObj);
@@ -134,11 +196,13 @@ void shadowPassCallback(GpuGraphPassContext* ctx, void* userData)
     rpEnc->setRenderState(st);
 
     for (const auto& draw : d->scene->draws) {
+        if (!draw.castsShadow) continue;
         DrawArguments a = {};
         a.vertexCount = draw.indexCount;
         a.instanceCount = 1;
         a.startIndexLocation = draw.firstIndex;
         rpEnc->drawIndexed(a);
+        if (d->diagShadow) d->diagShadowDraws++;
     }
 }
 
@@ -148,6 +212,7 @@ void forwardPassCallback(GpuGraphPassContext* ctx, void* userData)
     if (!ctx->renderPass || !d->pipelines->forwardPipeline || !d->pipelines->forwardRootObj) return;
 
     rhi::IRenderPassEncoder* rpEnc = ctx->renderPass->rhiPassEncoder;
+    if (!bindForwardShadowResources(*d->pipelines, *d, false)) return;
     {
         ShaderCursor c(d->pipelines->forwardRootObj);
         if (!updateForwardPassUniforms(c, d)) return;

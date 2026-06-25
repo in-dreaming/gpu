@@ -76,6 +76,7 @@ bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
             sda.loadOp = GPU_LOAD_OP_CLEAR;
             sda.storeOp = GPU_STORE_OP_STORE;
             sda.clearDepth = 1.0f;
+            sda.depthViewOverride = res.cascadeDepthView[ci];
             gpuGraphPassSetDepthAttachment(sp, &sda);
             gpuGraphPassSetCallback(sp, shadowPassCallback, &shadowPassData[ci]);
         }
@@ -186,6 +187,18 @@ bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
         printf("Graph compile failed\n");
         ok = false;
     } else {
+        if (fd.diagShadow) {
+            uint32_t execCount = gpuGraphGetExecutionOrderCount(graph);
+            printf("[diag] render graph execution order (%u passes):\n", execCount);
+            for (uint32_t si = 0; si < execCount; si++) {
+                uint32_t pi = gpuGraphGetExecutionOrderPassIndex(graph, si);
+                const char* name = gpuGraphGetPassName(graph, pi);
+                bool culled = gpuGraphIsPassCulled(graph, pi);
+                printf("  [%u] pass=%u name=%s culled=%d\n", si, pi, name ? name : "?", culled ? 1 : 0);
+            }
+            gpuGraphExportJson(graph, "shadow_diag_graph.json");
+        }
+
         GpuCommandQueue queue = nullptr;
         gpuGetQueue(ctx.device, GPU_QUEUE_TYPE_GRAPHICS, &queue);
         if (gpuGraphExecute(graph, queue) != GPU_SUCCESS) {
