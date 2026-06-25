@@ -181,6 +181,11 @@ int main(int argc, char** argv)
     const char* viewModeStr = nullptr;
     bool diagShadow = false;
     bool verifyShadow = false;
+    bool verifyPointShadow = false;
+    bool verifyLightTest = false;
+    bool verifyDefault = false;
+    bool useLightTestScene = false;
+    uint32_t lightTestPoints = 1;
     char dumpShadowDir[kMaxPathText] = {};
     bool dumpShadow = false;
     bool useSimpleScene = false;
@@ -188,8 +193,25 @@ int main(int argc, char** argv)
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) maxFrames = (uint32_t)std::max(0, std::atoi(argv[++i]));
         else if (strcmp(argv[i], "--simple") == 0 || strcmp(argv[i], "--simple-scene") == 0) useSimpleScene = true;
+        else if (strcmp(argv[i], "--light-test") == 0) {
+            useLightTestScene = true;
+            useSimpleScene = true;
+            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') {
+                lightTestPoints = (uint32_t)std::max(1, std::min(2, atoi(argv[++i])));
+            }
+        } else if (strcmp(argv[i], "--verify-light-test") == 0) {
+            verifyLightTest = true;
+            useLightTestScene = true;
+            useSimpleScene = true;
+        } else if (strcmp(argv[i], "--verify-default") == 0) {
+            verifyDefault = true;
+            useLightTestScene = true;
+            useSimpleScene = true;
+            lightTestPoints = 2;
+        }
         else if (strcmp(argv[i], "--diag-shadow") == 0) diagShadow = true;
         else if (strcmp(argv[i], "--verify-shadow") == 0) verifyShadow = true;
+        else if (strcmp(argv[i], "--verify-point-shadow") == 0) verifyPointShadow = true;
         else if (strcmp(argv[i], "--dump-shadow") == 0 && i + 1 < argc) {
             dumpShadow = true;
             snprintf(dumpShadowDir, sizeof(dumpShadowDir), "%s", argv[++i]);
@@ -217,6 +239,61 @@ int main(int argc, char** argv)
         features.dirShadows = true;
         if (maxFrames == 0) maxFrames = 1;
     }
+    if (verifyPointShadow) {
+        useSimpleScene = true;
+        features.pointShadows = true;
+        features.pointLights = true;
+        features.pointLightCount = 4;
+        features.dirShadows = true;
+        features.fog = false;
+        viewMode = RenderViewMode::PointLights;
+        if (maxFrames == 0) maxFrames = 12;
+        diagShadow = true;
+    }
+    if (useSimpleScene && !verifyLightTest && !verifyPointShadow) {
+        features.pointLights = true;
+        features.pointShadows = true;
+        features.pointLightCount = useLightTestScene ? lightTestPoints : 2u;
+        features.fog = false;
+        if (useLightTestScene) {
+            features.dirLight = false;
+            features.dirShadows = false;
+        }
+        if (!viewModeStr)
+            viewMode = RenderViewMode::PointLights;
+    }
+    if (useLightTestScene && !verifyLightTest) {
+        features.dirLight = false;
+        features.dirShadows = false;
+        features.fog = false;
+        features.pointLights = true;
+        features.pointShadows = true;
+        features.pointLightCount = lightTestPoints;
+        if (!viewModeStr)
+            viewMode = RenderViewMode::Final;
+    }
+    if (verifyDefault) {
+        features.dirLight = false;
+        features.dirShadows = false;
+        features.fog = false;
+        features.pointLights = true;
+        features.pointShadows = true;
+        features.pointLightCount = 2;
+        if (!viewModeStr)
+            viewMode = RenderViewMode::Final;
+        if (maxFrames == 0)
+            maxFrames = 12;
+    }
+    if (verifyLightTest) {
+        features.dirLight = false;
+        features.dirShadows = false;
+        features.fog = false;
+        features.pointLights = true;
+        features.pointLightCount = 1;
+        features.pointShadows = false;
+        viewMode = RenderViewMode::Final;
+        maxFrames = 24;
+    }
     if (verifyShadow) {
         features.dirShadows = true;
         features.fog = false;
@@ -231,7 +308,7 @@ int main(int argc, char** argv)
         diagShadow = true;
         useSimpleScene = true;
     }
-    if (renderViewModeNeedsDirShadows(viewMode) && !features.dirShadows) {
+    if (renderViewModeNeedsDirShadows(viewMode) && !features.dirShadows && !features.pointShadows) {
         features.dirShadows = true;
         printf("Auto-enabled dir shadows for --view-mode %s\n", renderViewModeName(viewMode));
     }
@@ -242,7 +319,11 @@ int main(int argc, char** argv)
         root = resolveSponzaRoot(requestedRoot, argv[0], rootBuf, sizeof(rootBuf));
         if (!root) {
             printf("Usage: 24_sponza_graph [--simple] [--features <csv>] [--view-mode <name>] [path-to-Sponza]\n");
-            printf("  --simple        plane + cubes test scene (no assets)\n");
+        printf("  --simple        open room + scattered props (no --light-test)\n");
+            printf("  --light-test [1|2]  same open room + center cube cluster for point lights\n");
+            printf("  --verify-light-test   auto-test 1/2 point lights +/- shadows\n");
+            printf("  --verify-default      auto-test --simple --light-test 2 startup path\n");
+            printf("  --verify-point-shadow  auto-test point-light cube shadows (simple scene)\n");
             renderFeaturesPrintHelp();
             renderViewModePrintHelp();
             return 0;
@@ -250,10 +331,14 @@ int main(int argc, char** argv)
     }
 
     SponzaScene scene;
-    if (useSimpleScene) {
+    if (useLightTestScene) {
+        buildSimpleLightTestScene(scene);
+        printf("Light-test scene (open room + cube cluster): %zu verts, %zu indices, %zu draws\n",
+               scene.vertices.size(), scene.indices.size(), scene.draws.size());
+    } else if (useSimpleScene) {
         buildSimpleShadowScene(scene);
-        printf("Simple scene: %zu verts, %zu indices, %zu materials, %zu draws\n",
-               scene.vertices.size(), scene.indices.size(), scene.materials.size(), scene.draws.size());
+        printf("Simple scene (open room + scattered props): %zu verts, %zu indices, %zu draws\n",
+               scene.vertices.size(), scene.indices.size(), scene.draws.size());
     } else {
         char objPath[kMaxPathText], mtlPath[kMaxPathText];
         pathJoin(objPath, sizeof(objPath), root, "sponza.obj");
@@ -356,6 +441,15 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (useSimpleScene || useLightTestScene) {
+        const SimpleRoomLayout room = getSimpleRoomLayout();
+        printf("Room shell: %.0fx%.0fx%.0fm (scale=%.0f), bounds (%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)\n",
+               room.halfX * 2.0f, room.halfY * 2.0f, room.halfZ * 2.0f, kSimpleSceneWorldScale, scene.boundsMin.x,
+               scene.boundsMin.y, scene.boundsMin.z, scene.boundsMax.x, scene.boundsMax.y, scene.boundsMax.z);
+        if (useLightTestScene && useSimpleScene)
+            printf("  --light-test: center cube cluster. Use --simple only for random props inside the room.\n");
+    }
+
     Vec3 center = {(scene.boundsMin.x + scene.boundsMax.x) * 0.5f,
                    (scene.boundsMin.y + scene.boundsMax.y) * 0.5f,
                    (scene.boundsMin.z + scene.boundsMax.z) * 0.5f};
@@ -380,7 +474,10 @@ int main(int argc, char** argv)
     FlyCamera cam;
     SimpleSceneLighting simpleLighting = {};
     DirLightController dirLightCtrl = {};
-    if (useSimpleScene) {
+    if (useLightTestScene) {
+        setupSimpleLightTestCamera(cam);
+        setupSimpleLightTestLighting(simpleLighting);
+    } else if (useSimpleScene) {
         setupSimpleSceneCamera(cam);
         setupSimpleSceneLighting(simpleLighting);
     } else {
@@ -402,8 +499,11 @@ int main(int argc, char** argv)
     fd.materials = &matTex;
     fd.features = features;
     fd.viewMode = viewMode;
-    fd.diagShadow = diagShadow || verifyShadow;
-    if (useSimpleScene) {
+    fd.lightTestMode = useLightTestScene;
+    fd.simpleSceneMode = useSimpleScene && !useLightTestScene;
+    fd.lightTestPointCount = lightTestPoints;
+    fd.diagShadow = diagShadow || verifyShadow || verifyPointShadow;
+    if (useSimpleScene || useLightTestScene) {
         memcpy(fd.dirLightDir, simpleLighting.dirLightDir, sizeof(fd.dirLightDir));
         memcpy(fd.dirLightColor, simpleLighting.dirLightColor, sizeof(fd.dirLightColor));
         memcpy(fd.ambientColor, simpleLighting.ambientColor, sizeof(fd.ambientColor));
@@ -420,7 +520,10 @@ int main(int argc, char** argv)
         fd.ambientColor[2] = 0.28f;
         fd.dirLightIntensity = 2.5f;
     }
-    dirLightSetFromTravelDir(dirLightCtrl, fd.dirLightDir[0], fd.dirLightDir[1], fd.dirLightDir[2]);
+    if (useLightTestScene)
+        setupSimpleLightTestDirLight(dirLightCtrl);
+    else
+        dirLightSetFromTravelDir(dirLightCtrl, fd.dirLightDir[0], fd.dirLightDir[1], fd.dirLightDir[2]);
     fd.surfaceWidth = 1280;
     fd.surfaceHeight = 720;
     fd.rhiVertexBuffer = rhiVB;
@@ -442,8 +545,25 @@ int main(int argc, char** argv)
     bool keys[256] = {};
     bool rmd = false;
     bool quit = false;
+    int32_t pendingPlaceLightIndex = -1;
     uint32_t loopFrame = 0;
     bool verifyOk = true;
+    bool verifyPointOk = true;
+    bool verifyLightTestOk = true;
+    bool verifyDefaultOk = true;
+    struct LightTestCase {
+        const char* name;
+        uint32_t pointCount;
+        bool pointShadows;
+    };
+    static const LightTestCase kLightTestCases[] = {
+        {"points=1 (type: point)", 1, false},
+        {"points=2 (type: point)", 2, false},
+        {"points=1+shadow (types: point+shadow)", 1, true},
+        {"points=2+shadow (types: point+shadow)", 2, true},
+    };
+    static constexpr uint32_t kLightTestCaseCount = 4;
+    static constexpr uint32_t kLightTestFramesPerCase = 6;
     ColorBufferStats verifyBaselineDirect = {};
     const RenderViewMode kVerifyModes[4] = {
         RenderViewMode::Shadow,
@@ -456,14 +576,25 @@ int main(int argc, char** argv)
     auto lastPrint = last;
 
     printf("WASD move, Q/E up/down, right-drag look, IJKL look, U/O light yaw, Y/H light pitch, [ ] view, Esc quit.\n");
-    if (useSimpleScene) {
-        CameraParams look = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight, 60.0f,
+    printf("  1-9 place spotlight at camera facing view (same key updates), 0 clear placed lights.\n");
+    if (useSimpleScene || useLightTestScene) {
+        CameraParams look = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight, simpleLighting.cameraFov,
                                              simpleLighting.cameraNear, simpleLighting.cameraFar);
         printf("Simple scene camera: pos=(%.1f,%.1f,%.1f) yaw=%.2f pitch=%.2f look=(%.2f,%.2f,%.2f)\n",
                cam.position.x, cam.position.y, cam.position.z, cam.yaw, cam.pitch, look.forward[0], look.forward[1],
                look.forward[2]);
     } else
         printf("Default view: pos=(321,733,-40) yaw=-1.62 frame=%u\n", kDefaultStartFrame);
+    if (useLightTestScene) {
+        const SimpleLightTestLayout layout = getSimpleLightTestLayout();
+        printf("Light-test layout: center=(%.2f,%.2f,%.2f) height=%.2f radius=%.2f points=%u shadows=%u\n",
+               layout.clusterCenter.x, layout.clusterCenter.y, layout.clusterCenter.z, layout.lightHeight,
+               layout.lightRadius, lightTestPoints,
+               features.pointShadows ? std::min(lightTestPoints, kMaxPointShadowSlots) : 0u);
+        printf("  Keys: [ ] view mode, ,/. switch 1/2 ceiling lights, 0 reset lights+camera, R reset camera\n");
+        printf("  Tip: default view is 'final' (lit scene). Press [ ] for debug views incl. 'points'. Press 0 to reset.\n");
+        printf("  Default dir-light: lightYaw=%.2f lightPitch=%.2f\n", dirLightCtrl.yaw, dirLightCtrl.pitch);
+    }
     renderFeaturesPrint(features);
     renderViewModePrint(viewMode);
 
@@ -494,7 +625,8 @@ int main(int argc, char** argv)
                 if (dn && k == 27) quit = true;
                 if (dn && k == ']') {
                     fd.viewMode = renderViewModeNext(fd.viewMode);
-                    if (renderViewModeNeedsDirShadows(fd.viewMode) && !features.dirShadows) {
+                    if (renderViewModeNeedsDirShadows(fd.viewMode) && !features.dirShadows &&
+                        !features.pointShadows) {
                         features.dirShadows = true;
                         fd.features = features;
                         printf("Auto-enabled dir shadows for debug view '%s'\n", renderViewModeName(fd.viewMode));
@@ -503,12 +635,41 @@ int main(int argc, char** argv)
                 }
                 if (dn && k == '[') {
                     fd.viewMode = renderViewModePrev(fd.viewMode);
-                    if (renderViewModeNeedsDirShadows(fd.viewMode) && !features.dirShadows) {
+                    if (renderViewModeNeedsDirShadows(fd.viewMode) && !features.dirShadows &&
+                        !features.pointShadows) {
                         features.dirShadows = true;
                         fd.features = features;
                         printf("Auto-enabled dir shadows for debug view '%s'\n", renderViewModeName(fd.viewMode));
                     }
                     renderViewModePrint(fd.viewMode);
+                }
+                if (dn && k == '0' && !verifyLightTest) {
+                    fd.placedPointLights.clearAll();
+                    if (useLightTestScene) {
+                        features.pointLightCount = lightTestPoints;
+                        fd.features = features;
+                        setupSimpleLightTestCamera(cam);
+                        setupSimpleLightTestDirLight(dirLightCtrl);
+                        printf("Cleared placed lights; restored %u ceiling light(s) and reset camera.\n",
+                               lightTestPoints);
+                    } else {
+                        printf("Cleared all camera-placed point lights.\n");
+                    }
+                }
+                if (dn && (k == 'r' || k == 'R') && useLightTestScene && !verifyLightTest) {
+                    setupSimpleLightTestCamera(cam);
+                    setupSimpleLightTestDirLight(dirLightCtrl);
+                    printf("Reset camera to light-test default.\n");
+                }
+                if (dn && !verifyLightTest && k >= '1' && k <= '9') {
+                    pendingPlaceLightIndex = (int32_t)(k - '1');
+                }
+                if (dn && useLightTestScene && !verifyLightTest && (k == ',' || k == '.')) {
+                    lightTestPoints = (k == ',') ? 1u : 2u;
+                    fd.lightTestPointCount = lightTestPoints;
+                    features.pointLightCount = lightTestPoints;
+                    fd.features = features;
+                    printf("Light-test: %u point light(s)\n", lightTestPoints);
                 }
             }
             if (ev.type == GPU_PLATFORM_EVENT_MOUSE_BUTTON_DOWN || ev.type == GPU_PLATFORM_EVENT_MOUSE_BUTTON_UP) {
@@ -517,17 +678,65 @@ int main(int argc, char** argv)
             if (ev.type == GPU_PLATFORM_EVENT_MOUSE_MOVE && rmd) rotateCameraByMouse(cam, ev.mouse.dx, ev.mouse.dy);
         }
 
-        updateCamera(cam, keys, dt);
+        if (useSimpleScene || useLightTestScene) {
+            updateCamera(cam, keys, dt, simpleLighting.cameraMoveSpeed, simpleLighting.cameraLookSpeed);
+        } else {
+            updateCamera(cam, keys, dt);
+        }
         updateDirLightController(dirLightCtrl, keys, dt);
         dirLightWriteTravelDir(dirLightCtrl, fd.dirLightDir);
 
         float t = (float)loopFrame * 0.02f;
-        if (useSimpleScene) {
-            fd.cameraParams = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight, 60.0f,
+
+        if (verifyLightTest) {
+            const uint32_t caseIndex = loopFrame / kLightTestFramesPerCase;
+            if (caseIndex >= kLightTestCaseCount) {
+                quit = true;
+                continue;
+            }
+            const LightTestCase& tc = kLightTestCases[caseIndex];
+            const uint32_t frameInCase = loopFrame % kLightTestFramesPerCase;
+            features.pointLights = true;
+            features.pointLightCount = tc.pointCount;
+            features.pointShadows = tc.pointShadows;
+            features.dirLight = false;
+            features.dirShadows = false;
+            features.fog = false;
+            fd.lightTestPointCount = tc.pointCount;
+            fd.features = features;
+            if (frameInCase == 0) {
+                if (tc.pointShadows && tc.pointCount == 1)
+                    fd.viewMode = RenderViewMode::PointLights;
+                else
+                    fd.viewMode = RenderViewMode::Final;
+                printf("[verify-light] case %u/%u: %s\n", caseIndex + 1, kLightTestCaseCount, tc.name);
+            }
+        }
+
+        if (useSimpleScene || useLightTestScene) {
+            fd.cameraParams = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight, simpleLighting.cameraFov,
                                                simpleLighting.cameraNear, simpleLighting.cameraFar);
         } else {
             fd.cameraParams = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight);
         }
+
+        if (pendingPlaceLightIndex >= 0) {
+            const uint32_t lightIndex = (uint32_t)pendingPlaceLightIndex;
+            if (lightIndex < PlacedPointLights::kMaxSlots) {
+                fd.placedPointLights.placeAtCamera(lightIndex, fd.cameraParams, scene.boundsMin, scene.boundsMax);
+                features.pointLights = true;
+                const uint32_t lightBase = useLightTestScene ? lightTestPoints : 0u;
+                features.pointLightCount = std::max(
+                    {features.pointLightCount, lightBase + lightIndex + 1,
+                     lightBase + fd.placedPointLights.requiredLightCount()});
+                fd.features = features;
+                if (useLightTestScene)
+                    printf("  (light-test: ceiling lights 1-%u kept; key %u is extra light %u)\n", lightTestPoints,
+                           lightIndex + 1, lightBase + lightIndex + 1);
+            }
+            pendingPlaceLightIndex = -1;
+        }
+
         fd.frameIndex = loopFrame;
 
         {
@@ -540,7 +749,7 @@ int main(int argc, char** argv)
             }
         }
 
-        if (features.pointLights) updatePointLights(fd, center, t);
+        if (features.pointLights) updatePointLights(fd, scene.boundsMin, scene.boundsMax, t);
         else fd.lightCount = 0;
 
         if (verifyShadow) {
@@ -625,6 +834,88 @@ int main(int argc, char** argv)
             }
         }
 
+        if (verifyLightTest && (loopFrame % kLightTestFramesPerCase) == (kLightTestFramesPerCase - 1)) {
+            device->graphicsQueue->waitOnHost();
+            const uint32_t caseIndex = loopFrame / kLightTestFramesPerCase;
+            const LightTestCase& tc = kLightTestCases[caseIndex];
+            ColorBufferStats colorStats = {};
+            if (shadowDiagReadbackSurface(device, bb, fd.surfaceWidth, fd.surfaceHeight, colorStats)) {
+                shadowDiagPrintColorStats(colorStats, tc.name);
+                char failMsg[256] = {};
+                bool pass = false;
+                if (tc.pointShadows && tc.pointCount == 1)
+                    pass = shadowDiagCheckPointLightsView(colorStats, failMsg, sizeof(failMsg));
+                else if (tc.pointShadows)
+                    pass = shadowDiagCheckLightTestFinal(colorStats, tc.pointCount, tc.pointShadows, failMsg,
+                                                         sizeof(failMsg));
+                else
+                    pass = shadowDiagCheckLightTestFinal(colorStats, tc.pointCount, false, failMsg, sizeof(failMsg));
+                if (!pass) {
+                    printf("[verify-light] FAIL %s: %s\n", tc.name, failMsg);
+                    verifyLightTestOk = false;
+                } else {
+                    printf("[verify-light] PASS %s\n", tc.name);
+                }
+            } else {
+                printf("[verify-light] FAIL %s: readback failed\n", tc.name);
+                verifyLightTestOk = false;
+            }
+        }
+
+        if (verifyDefault) {
+            if (loopFrame == 5)
+                fd.viewMode = RenderViewMode::PointLights;
+            else if (loopFrame == 8)
+                fd.viewMode = RenderViewMode::Shadow;
+            else if (loopFrame == 10)
+                fd.viewMode = RenderViewMode::Final;
+        }
+
+        if (verifyDefault && (loopFrame == 7 || loopFrame == 9 || loopFrame == 11)) {
+            device->graphicsQueue->waitOnHost();
+            ColorBufferStats colorStats = {};
+            const char* label =
+                (loopFrame == 7) ? "default_points" : (loopFrame == 9) ? "default_shadow" : "default_final";
+            if (shadowDiagReadbackSurface(device, bb, fd.surfaceWidth, fd.surfaceHeight, colorStats)) {
+                shadowDiagPrintColorStats(colorStats, label);
+                char failMsg[256] = {};
+                bool pass = false;
+                if (loopFrame == 7)
+                    pass = shadowDiagCheckDefaultLightTestPoints(colorStats, failMsg, sizeof(failMsg));
+                else if (loopFrame == 9)
+                    pass = shadowDiagCheckDefaultLightTestShadow(colorStats, failMsg, sizeof(failMsg));
+                else
+                    pass = shadowDiagCheckDefaultLightTestFinal(colorStats, failMsg, sizeof(failMsg));
+                if (!pass) {
+                    printf("[verify-default] FAIL %s: %s\n", label, failMsg);
+                    verifyDefaultOk = false;
+                } else {
+                    printf("[verify-default] PASS %s\n", label);
+                }
+            } else {
+                printf("[verify-default] FAIL %s: readback failed\n", label);
+                verifyDefaultOk = false;
+            }
+        }
+
+        if (verifyPointShadow && loopFrame == 8) {
+            device->graphicsQueue->waitOnHost();
+            ColorBufferStats colorStats = {};
+            if (shadowDiagReadbackSurface(device, bb, fd.surfaceWidth, fd.surfaceHeight, colorStats)) {
+                shadowDiagPrintColorStats(colorStats, "point_lights");
+                char failMsg[256] = {};
+                if (!shadowDiagCheckPointLightsView(colorStats, failMsg, sizeof(failMsg))) {
+                    printf("[verify-point] FAIL points view: %s\n", failMsg);
+                    verifyPointOk = false;
+                } else {
+                    printf("[verify-point] PASS points view (shadow darkening visible)\n");
+                }
+            } else {
+                printf("[verify-point] FAIL points view: color readback failed\n");
+                verifyPointOk = false;
+            }
+        }
+
         if (verifyShadow && loopFrame < 6) {
             device->graphicsQueue->waitOnHost();
             ColorBufferStats colorStats = {};
@@ -695,6 +986,21 @@ int main(int argc, char** argv)
                 shadowDiagPrintStats(stats, ci);
         }
         printf("=== End shadow diagnostics ===\n");
+    }
+
+    if (verifyDefault) {
+        printf("=== Default light-test verify: %s ===\n", verifyDefaultOk ? "PASS" : "FAIL");
+        if (!verifyDefaultOk) return 1;
+    }
+
+    if (verifyLightTest) {
+        printf("=== Light-test verify: %s ===\n", verifyLightTestOk ? "PASS" : "FAIL");
+        if (!verifyLightTestOk) return 1;
+    }
+
+    if (verifyPointShadow) {
+        printf("=== Point shadow verify: %s ===\n", verifyPointOk ? "PASS" : "FAIL");
+        if (!verifyPointOk) return 1;
     }
 
     if (verifyShadow) {

@@ -144,7 +144,7 @@ bool createDemoPipelines(GpuDevice device, DemoPipelines& p, GpuFormat surfaceFo
         fpd.rasterizer.fillMode = FillMode::Solid;
         fpd.label = "forward_pipeline";
         if (SLANG_FAILED(rhiDevice->createRenderPipeline(fpd, p.forwardPipeline.writeRef()))) {
-            printf("Forward pipeline failed\n");
+            printf("Forward pipeline failed (shader compiled; check GPU validation layer output)\n");
             return false;
         }
     }

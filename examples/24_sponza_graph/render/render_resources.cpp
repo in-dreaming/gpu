@@ -68,11 +68,11 @@ bool initRenderResources(RenderResources& r, uint32_t w, uint32_t h, uint32_t ma
         if (gpuCreateSampler(r.device, &sd, &r.shadowSampler) != GPU_SUCCESS) return false;
     }
 
-    // Point-shadow depth read sampler (non-comparison, for cube radial compare)
+    // Point-shadow depth read sampler (non-comparison; nearest for depth compare)
     {
         GpuSamplerDesc sd = {};
-        sd.minFilter = GPU_FILTER_LINEAR;
-        sd.magFilter = GPU_FILTER_LINEAR;
+        sd.minFilter = GPU_FILTER_NEAREST;
+        sd.magFilter = GPU_FILTER_NEAREST;
         sd.mipFilter = GPU_FILTER_NEAREST;
         sd.addressModeU = GPU_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         sd.addressModeV = GPU_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -103,6 +103,16 @@ bool initRenderResources(RenderResources& r, uint32_t w, uint32_t h, uint32_t ma
         bd.usage = GPU_BUFFER_USAGE_SHADER_RESOURCE | GPU_BUFFER_USAGE_COPY_DEST;
         bd.label = "cascade_matrix_buffer";
         if (gpuCreateBuffer(r.device, &bd, &r.cascadeMatrixBuffer) != GPU_SUCCESS) return false;
+    }
+
+    // Point shadow view-proj matrices (8 slots x 6 faces)
+    {
+        GpuBufferDesc bd = {};
+        bd.size = sizeof(float) * 16 * kMaxPointShadowSlots * kCubeFaceCount;
+        bd.elementSize = sizeof(float) * 16;
+        bd.usage = GPU_BUFFER_USAGE_SHADER_RESOURCE | GPU_BUFFER_USAGE_COPY_DEST;
+        bd.label = "point_shadow_matrix_buffer";
+        if (gpuCreateBuffer(r.device, &bd, &r.pointShadowMatrixBuffer) != GPU_SUCCESS) return false;
     }
 
     // Light index buffer (culling output)
@@ -452,6 +462,7 @@ void destroyRenderResources(RenderResources& r) {
     destroy(r.indexBuffer, gpuDestroyBuffer);
     destroy(r.lightBuffer, gpuDestroyBuffer);
     destroy(r.cascadeMatrixBuffer, gpuDestroyBuffer);
+    destroy(r.pointShadowMatrixBuffer, gpuDestroyBuffer);
     destroy(r.lightIndexBuffer, gpuDestroyBuffer);
 
     destroy(r.ssgiOutputUav, gpuDestroyTextureView);

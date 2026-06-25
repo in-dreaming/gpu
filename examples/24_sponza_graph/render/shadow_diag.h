@@ -35,6 +35,13 @@ bool shadowDiagReadbackCascadeDepth(GpuDevice device, GpuTextureHandle tex, Shad
 bool shadowDiagReadbackSurface(GpuDevice device, GpuSurfaceTexture surf, uint32_t w, uint32_t h, ColorBufferStats& stats);
 bool shadowDiagCheckViewMode(const ColorBufferStats& stats, RenderViewMode mode, char* failMsg, size_t failMsgSize);
 bool shadowDiagCheckViewModeSimple(const ColorBufferStats& stats, RenderViewMode mode, char* failMsg, size_t failMsgSize);
+bool shadowDiagCheckPointLightsView(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize);
+bool shadowDiagCheckLightTestFinal(const ColorBufferStats& stats, uint32_t pointCount, bool pointShadows,
+                                   char* failMsg, size_t failMsgSize);
+bool shadowDiagCheckDefaultLightTestPoints(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize);
+bool shadowDiagCheckDefaultLightTestShadow(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize);
+bool shadowDiagCheckDefaultLightTestFinal(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize);
+bool shadowDiagCheckPointShadowDepth(GpuDevice device, GpuTextureHandle cubeTex, char* failMsg, size_t failMsgSize);
 void shadowDiagPrintColorStats(const ColorBufferStats& stats, const char* label);
 void shadowDiagPrintBindingState(const FrameData& frame, DemoPipelines& pipelines);
 void shadowDiagPrintStats(const ShadowDepthStats& stats, int cascadeIndex);

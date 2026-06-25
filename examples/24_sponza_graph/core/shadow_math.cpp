@@ -60,13 +60,15 @@ static void buildOrthographicProjection(float minX, float maxX, float minY, floa
 
 static void buildPerspectiveProjection(const CameraParams& cam, float* out)
 {
+    // Match forward.slang / shadow clip: clip.z = viewZ - near, clip.w = viewZ (row-vector layout).
     memset(out, 0, sizeof(float) * 16);
     float n = cam.zParams[0];
     out[0] = cam.proj[0];
     out[5] = cam.proj[1];
-    out[10] = 1.0f;
-    out[11] = 1.0f;
-    out[14] = -n;
+    out[10] = 1.0f;  // m22
+    out[11] = -n;    // m32
+    out[14] = 1.0f;  // m23
+    out[15] = 0.0f;  // m33
 }
 
 static void buildCameraViewMatrix(const CameraParams& cam, float* out)
@@ -270,8 +272,40 @@ void buildPointCubeFaceViewProj(
     float farZ,
     float outViewProj[16])
 {
+    // Per-face up vectors match Vulkan cube-map face orientation (+Y/-Y cannot use world Y as up).
+    static const Vec3 kUps[6] = {
+        {0.0f, -1.0f, 0.0f},
+        {0.0f, -1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, -1.0f},
+        {0.0f, -1.0f, 0.0f},
+        {0.0f, -1.0f, 0.0f},
+    };
+
     Vec3 target = {};
     cubeFaceTarget(lightPos, faceIndex, target);
-    CameraParams cam = makeCameraLookAt(lightPos, target, 90.0f, 1.0f, nearZ, farZ);
+    Vec3 forward = normalize(sub(target, lightPos));
+    Vec3 up = kUps[faceIndex % 6];
+    Vec3 right = normalize(cross(forward, up));
+    up = normalize(cross(right, forward));
+
+    float f = 1.0f / tanf(90.0f * 0.5f * 3.14159265f / 180.0f);
+    CameraParams cam = {};
+    cam.cameraPos[0] = lightPos.x;
+    cam.cameraPos[1] = lightPos.y;
+    cam.cameraPos[2] = lightPos.z;
+    cam.right[0] = right.x;
+    cam.right[1] = right.y;
+    cam.right[2] = right.z;
+    cam.up[0] = up.x;
+    cam.up[1] = up.y;
+    cam.up[2] = up.z;
+    cam.forward[0] = forward.x;
+    cam.forward[1] = forward.y;
+    cam.forward[2] = forward.z;
+    cam.proj[0] = f;
+    cam.proj[1] = f;
+    cam.zParams[0] = nearZ;
+    cam.zParams[1] = farZ;
     cameraParamsToViewProj(cam, outViewProj);
 }

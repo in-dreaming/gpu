@@ -42,8 +42,10 @@ struct RenderResources {
     // Light buffer
     GpuBufferHandle lightBuffer = GPU_NULL_HANDLE;
 
-    // Per-frame camera data (uploaded as constant buffer)
+    // Per-frame cascade view-proj matrices for forward shadow sampling (4 x float4x4)
     GpuBufferHandle cascadeMatrixBuffer = GPU_NULL_HANDLE;
+    // Point-light cube shadow view-proj (8 slots x 6 faces x float4x4)
+    GpuBufferHandle pointShadowMatrixBuffer = GPU_NULL_HANDLE;
 
     // Light cull output
     GpuBufferHandle lightIndexBuffer = GPU_NULL_HANDLE;

@@ -47,10 +47,11 @@ bool shadowDiagVerifyShaderLayout(DemoPipelines& pipelines)
     ShaderCursor fwd(pipelines.forwardRootObj.get());
     ShaderCursor sh(pipelines.shadowRootObj.get());
 
-    const char* fwdFields[] = {"gFwd", "cascadeViewProjs", "gCascadeSplitFar", "gCascadeTexelSize", "gCascadeWorldTexel",
-                               "gCascadeDepthBias", "enableDirShadowFlag", "enableDirLightFlag",
-                               "shadowMap0", "shadowMap1",
-                               "shadowMap2", "shadowMap3", "shadowSampler", "baseColorArray"};
+    const char* fwdFields[] = {"gFwd", "cascadeViewProjs", "pointShadowViewProjs", "gCascadeSplitFar", "gCascadeTexelSize",
+                               "gCascadeWorldTexel", "gCascadeDepthBias", "gPointShadowNearFar", "enableDirShadowFlag",
+                               "enableDirLightFlag", "enablePointShadowFlag", "shadowMap0", "shadowMap1",
+                               "shadowMap2", "shadowMap3", "shadowSampler", "pointShadowCube0", "pointShadowCube7",
+                               "pointShadowDepthSampler", "baseColorArray"};
     for (const char* name : fwdFields) {
         bool valid = fwd[name].isValid();
         printf("[diag] forward field '%s' valid=%d\n", name, valid ? 1 : 0);
@@ -461,6 +462,183 @@ bool shadowDiagCheckViewModeSimple(const ColorBufferStats& stats, RenderViewMode
     default:
         return shadowDiagCheckViewMode(stats, mode, failMsg, failMsgSize);
     }
+}
+
+bool shadowDiagCheckPointLightsView(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize)
+{
+    if (failMsg && failMsgSize > 0) failMsg[0] = 0;
+    if (!stats.readbackOk) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "readback failed");
+        return false;
+    }
+
+    const uint32_t total = stats.width * stats.height;
+    if (total == 0) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "empty image");
+        return false;
+    }
+
+    const float lumaSpan = stats.maxLuma - stats.minLuma;
+    const float blackRatio = (float)stats.pixelsNearBlack / (float)total;
+
+    if (stats.maxLuma < 0.04f) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "points view max luma %.3f too dark", stats.maxLuma);
+        return false;
+    }
+    if (lumaSpan < 0.06f) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "points view span %.3f too small", lumaSpan);
+        return false;
+    }
+    if (blackRatio < 0.002f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "points view lacks shadow darkening (nearBlack=%.2f%%)", blackRatio * 100.0f);
+        return false;
+    }
+    return true;
+}
+
+bool shadowDiagCheckLightTestFinal(const ColorBufferStats& stats, uint32_t pointCount, bool pointShadows,
+                                   char* failMsg, size_t failMsgSize)
+{
+    if (failMsg && failMsgSize > 0) failMsg[0] = 0;
+    if (!stats.readbackOk) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "readback failed");
+        return false;
+    }
+
+    const uint32_t total = stats.width * stats.height;
+    if (total == 0) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "empty image");
+        return false;
+    }
+
+    const float lumaSpan = stats.maxLuma - stats.minLuma;
+    const float blackRatio = (float)stats.pixelsNearBlack / (float)total;
+
+    if (stats.maxLuma < 0.03f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "final too dark (max=%.3f) with %u point(s)", stats.maxLuma, pointCount);
+        return false;
+    }
+    if (lumaSpan < 0.04f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "final span %.3f too small (%u point(s))", lumaSpan, pointCount);
+        return false;
+    }
+
+    if (pointCount >= 2 && lumaSpan < 0.07f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "dual-light span %.3f too small", lumaSpan);
+        return false;
+    }
+
+    if (pointShadows && blackRatio < 0.001f && stats.minLuma > stats.maxLuma * 0.55f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "point-shadow case lacks contrast (min=%.3f max=%.3f)",
+                     stats.minLuma, stats.maxLuma);
+        return false;
+    }
+
+    return true;
+}
+
+bool shadowDiagCheckDefaultLightTestPoints(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize)
+{
+    if (failMsg && failMsgSize > 0) failMsg[0] = 0;
+    if (!stats.readbackOk) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "readback failed");
+        return false;
+    }
+    if (stats.maxLuma < 0.04f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "default points view max luma %.3f (expect lit areas)", stats.maxLuma);
+        return false;
+    }
+    return true;
+}
+
+bool shadowDiagCheckDefaultLightTestShadow(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize)
+{
+    if (failMsg && failMsgSize > 0) failMsg[0] = 0;
+    if (!stats.readbackOk) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "readback failed");
+        return false;
+    }
+    const uint32_t total = stats.width * stats.height;
+    if (total == 0) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "empty image");
+        return false;
+    }
+    const float span = stats.maxLuma - stats.minLuma;
+    if (span < 0.08f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "shadow view span %.3f too small", span);
+        return false;
+    }
+    const float blackRatio = (float)stats.pixelsNearBlack / (float)total;
+    if (blackRatio < 0.05f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "shadow view lacks dark texels (%.1f%% nearBlack)", blackRatio * 100.0f);
+        return false;
+    }
+    return true;
+}
+
+bool shadowDiagCheckDefaultLightTestFinal(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize)
+{
+    if (failMsg && failMsgSize > 0) failMsg[0] = 0;
+    if (!stats.readbackOk) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "readback failed");
+        return false;
+    }
+    const uint32_t total = stats.width * stats.height;
+    if (total == 0) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "empty image");
+        return false;
+    }
+    const float span = stats.maxLuma - stats.minLuma;
+    if (stats.maxLuma < 0.08f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "final too dark (max=%.3f)", stats.maxLuma);
+        return false;
+    }
+    if (span < 0.10f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "final span %.3f too small (shadows not visible)", span);
+        return false;
+    }
+    if (stats.minLuma > stats.maxLuma * 0.55f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "final lacks contrast (min=%.3f max=%.3f)", stats.minLuma, stats.maxLuma);
+        return false;
+    }
+    return true;
+}
+
+bool shadowDiagCheckPointShadowDepth(GpuDevice device, GpuTextureHandle cubeTex, char* failMsg, size_t failMsgSize)
+{
+    if (failMsg && failMsgSize > 0) failMsg[0] = 0;
+    ShadowDepthStats stats = {};
+    if (!shadowDiagReadbackCascadeDepth(device, cubeTex, stats)) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "cube depth readback failed");
+        return false;
+    }
+    shadowDiagPrintStats(stats, 100);
+    if (!stats.readbackOk) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "cube depth stats unavailable");
+        return false;
+    }
+    if (stats.maxVal < 0.02f) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "cube depth max %.4f (empty shadow pass)", stats.maxVal);
+        return false;
+    }
+    if (stats.pixelsMidRange < 8 && stats.pixelsNearZero < 8) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "cube depth lacks occluders (mid=%u zero=%u)", stats.pixelsMidRange,
+                     stats.pixelsNearZero);
+        return false;
+    }
+    return true;
 }
 
 static bool readbackSurfaceRaw(GpuDevice device, GpuSurfaceTexture surf, uint32_t w, uint32_t h,

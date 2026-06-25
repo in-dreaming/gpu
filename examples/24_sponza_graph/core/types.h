@@ -26,14 +26,18 @@ struct CameraParams {
 };
 
 struct PointLightData {
-    float position[3]; float radius;
+    float position[3];
+    float radius;
     float color[3];
     int32_t shadowMapIndex; // -1 = no shadow map; else 0..kMaxPointShadowSlots-1
-    uint32_t pad0;
+    uint32_t spotEnable;    // 0 = omnidirectional, 1 = spotlight along direction
+    float direction[3];     // emission direction (world space, unit length)
+    float innerConeCos;     // cos(inner half-angle)
+    float outerConeCos;     // cos(outer half-angle)
 };
 
 static constexpr uint32_t kMaxPointShadowSlots = 8;
-static constexpr uint32_t kPointShadowMapSize = 256;
+static constexpr uint32_t kPointShadowMapSize = 512;
 static constexpr uint32_t kCubeFaceCount = 6;
 static constexpr uint32_t kShadowMapSize = 2048;
 

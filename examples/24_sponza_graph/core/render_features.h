@@ -91,6 +91,11 @@ inline bool renderFeaturesParseToken(RenderFeatures& f, const char* token)
         f.fog = false;
         return true;
     }
+    if (strcmp(token, "nodir") == 0 || strcmp(token, "no-dir") == 0 || strcmp(token, "nodirlight") == 0) {
+        f.dirLight = false;
+        f.dirShadows = false;
+        return true;
+    }
     if (strncmp(token, "points=", 7) == 0) {
         int n = atoi(token + 7);
         f.pointLights = n > 0;
@@ -159,6 +164,7 @@ inline void renderFeaturesPrintHelp()
     printf("  ssgi            screen-space GI (implies gbuffer)\n");
     printf("  all             enable everything\n");
     printf("  nofog           disable distance fog\n");
+    printf("  nodir           disable directional sun (+ CSM)\n");
     printf("Examples:\n");
     printf("  24_sponza_graph --features base\n");
     printf("  24_sponza_graph --features shadows\n");

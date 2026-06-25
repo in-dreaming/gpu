@@ -142,6 +142,7 @@ set(24_SPONZA_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/pass_callbacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/frame_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/frame_update.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/placed_lights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/shadow_diag.cpp
 )
 set(24_SPONZA_SHADERS

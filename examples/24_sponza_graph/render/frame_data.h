@@ -7,6 +7,7 @@
 #include "core/types.h"
 #include "render/material_textures.h"
 #include "render/pipelines.h"
+#include "render/placed_lights.h"
 #include "render/render_resources.h"
 #include "gpu/gpu.h"
 
@@ -29,6 +30,7 @@ struct ForwardFeatureFlagsCpu {
     uint32_t enableDirLight;
     uint32_t enableDirShadow;
     uint32_t enablePointLights;
+    uint32_t enablePointShadows;
     uint32_t enableSSGI;
     uint32_t enableFog;
     uint32_t pointLightCount;
@@ -54,8 +56,10 @@ struct FrameData {
     CameraParams cameraParams = {};
     CascadeShadowData cascadeShadows[kCascadeCount] = {};
     float pointShadowViewProj[kMaxPointShadowSlots][6][16] = {};
+    float pointShadowLightPos[kMaxPointShadowSlots][3] = {};
     float pointShadowNear[kMaxPointShadowSlots] = {};
     float pointShadowFar[kMaxPointShadowSlots] = {};
+    uint32_t pointShadowSlotCount = 0;
 
     uint32_t lightCount = 0;
     float dirLightDir[3] = {};
@@ -69,6 +73,12 @@ struct FrameData {
 
     RenderFeatures features = {};
     RenderViewMode viewMode = RenderViewMode::Final;
+
+    bool lightTestMode = false;
+    bool simpleSceneMode = false;
+    uint32_t lightTestPointCount = 1;
+
+    PlacedPointLights placedPointLights = {};
 
     bool diagShadow = false;
     uint32_t diagShadowPasses = 0;
@@ -97,4 +107,12 @@ struct FrameGraphContext {
     FrameData* frame = nullptr;
 };
 
-void updatePointLights(FrameData& frame, const Vec3& sceneCenter, float timeSec);
+void updatePointLights(FrameData& frame, const Vec3& boundsMin, const Vec3& boundsMax, float timeSec);
+
+inline uint32_t effectivePointShadowSlotCount(const FrameData& frame)
+{
+    if (!frame.features.pointShadows) return 0;
+    if (frame.pointShadowSlotCount > 0) return frame.pointShadowSlotCount;
+    const uint32_t n = frame.features.pointLights ? frame.features.pointLightCount : 0;
+    return std::min(std::max(1u, n), kMaxPointShadowSlots);
+}

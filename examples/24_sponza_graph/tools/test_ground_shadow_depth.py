@@ -2,8 +2,8 @@
 """CPU check: ground point beside cube should have compareDepth > cube mapDepth in light space."""
 import math
 
-bounds_min = (-5, 0, -5)
-bounds_max = (5, 1.5, 5)
+bounds_min = (-40, 0, -40)
+bounds_max = (40, 60, 40)
 
 
 def dot(a, b):
@@ -15,8 +15,8 @@ def normalize(v):
     return (v[0] / L, v[1] / L, v[2] / L) if L > 1e-12 else (0, 1, 0)
 
 
-cam_pos = (4.5, 3.0, -4.8)
-target = (0.0, 0.55, 0.0)
+cam_pos = (5.0, 20.0, -32.0)
+target = (0.0, 10.0, 12.0)
 delta = tuple(target[i] - cam_pos[i] for i in range(3))
 horiz = math.sqrt(delta[0] ** 2 + delta[2] ** 2)
 yaw = math.atan2(delta[0], delta[2])
@@ -43,8 +43,8 @@ dir_light = (0.35, -0.90, 0.25)
 L = math.sqrt(sum(x * x for x in dir_light))
 light_fwd = tuple(x / L for x in dir_light)
 
-bounds_min = (-5, 0, -5)
-bounds_max = (5, 1.5, 5)
+bounds_min = (-40, 0, -40)
+bounds_max = (40, 60, 40)
 
 
 def sub(a, b):

@@ -2,8 +2,10 @@
 #include "pass_callbacks.h"
 
 #include "core/shadow_math.h"
+#include "core/types.h"
 #include "gpu/core/gpu_command.h"
 
+#include <algorithm>
 #include <cstdio>
 
 bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
@@ -83,9 +85,10 @@ bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
     }
 
     if (features.pointShadows) {
+        const uint32_t pointShadowSlots = effectivePointShadowSlotCount(fd);
         ShadowPassData pointFacePassData[kMaxPointShadowSlots * kCubeFaceCount] = {};
         uint32_t pointPassIndex = 0;
-        for (uint32_t pi = 0; pi < kMaxPointShadowSlots; pi++) {
+        for (uint32_t pi = 0; pi < pointShadowSlots; pi++) {
             for (uint32_t face = 0; face < kCubeFaceCount; face++) {
                 pointFacePassData[pointPassIndex].frame = &fd;
                 pointFacePassData[pointPassIndex].type = ShadowPassType::PointCubeFace;
@@ -176,7 +179,8 @@ bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
         for (int ci = 0; ci < 4; ci++) gpuGraphPassRead(fp, cascadeRes[ci]);
     }
     if (features.pointShadows) {
-        for (uint32_t pi = 0; pi < kMaxPointShadowSlots; pi++) gpuGraphPassRead(fp, pointShadowRes[pi]);
+        const uint32_t pointShadowSlots = effectivePointShadowSlotCount(fd);
+        for (uint32_t pi = 0; pi < pointShadowSlots; pi++) gpuGraphPassRead(fp, pointShadowRes[pi]);
     }
     if (features.ssgi) gpuGraphPassRead(fp, ssgiRes);
     if (features.pointLights) gpuGraphPassRead(fp, lightBufRes);

@@ -4,8 +4,8 @@
 
 static float clampLocal(float v, float lo, float hi) { return std::max(lo, std::min(hi, v)); }
 
-void updateCamera(FlyCamera& cam, const bool keys[256], float dt) {
-    const float ms = 430, ls = 1.9f;
+void updateCamera(FlyCamera& cam, const bool keys[256], float dt, float moveSpeed, float lookSpeed) {
+    const float ms = moveSpeed, ls = lookSpeed;
     if (keys['j']) cam.yaw -= ls * dt;
     if (keys['l']) cam.yaw += ls * dt;
     if (keys['i']) cam.pitch += ls * dt;

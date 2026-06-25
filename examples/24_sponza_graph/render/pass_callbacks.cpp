@@ -69,6 +69,44 @@ static bool uploadAndBindCascadeMatrices(ShaderCursor& c, FrameData* d)
     return bindCascadeMatrixBuffer(c, d, d->diagShadow ? "cascadeViewProjs" : nullptr);
 }
 
+static bool bindPointShadowMatrixBuffer(ShaderCursor& c, FrameData* d, const char* debugName)
+{
+    if (!d->device || !d->resources || !gpuHandleIsValid(d->resources->pointShadowMatrixBuffer)) return false;
+    auto* rhiBuf = static_cast<rhi::IBuffer*>(d->device->bufferPool.resolve(
+        d->resources->pointShadowMatrixBuffer.index, d->resources->pointShadowMatrixBuffer.generation));
+    return shaderCursorSetBinding(c, "pointShadowViewProjs", rhiBuf, debugName);
+}
+
+static bool uploadPointShadowMatrixBuffer(FrameData* d)
+{
+    if (!d->device || !d->resources || !gpuHandleIsValid(d->resources->pointShadowMatrixBuffer)) return false;
+    float matrices[16 * kMaxPointShadowSlots * kCubeFaceCount] = {};
+    for (uint32_t slot = 0; slot < kMaxPointShadowSlots; slot++) {
+        for (int face = 0; face < kCubeFaceCount; face++)
+            memcpy(matrices + (slot * kCubeFaceCount + face) * 16,
+                   d->pointShadowViewProj[slot][face],
+                   sizeof(float) * 16);
+    }
+    return gpuUploadToBuffer(d->device, d->resources->pointShadowMatrixBuffer, matrices, sizeof(matrices), 0) ==
+           GPU_SUCCESS;
+}
+
+static bool uploadPointShadowUniforms(ShaderCursor& c, FrameData* d)
+{
+    if (!d->features.pointShadows)
+        return true;
+    if (!uploadPointShadowMatrixBuffer(d)) return false;
+    if (!bindPointShadowMatrixBuffer(c, d, d->diagShadow ? "pointShadowViewProjs" : nullptr)) return false;
+
+    float nearFar[8][4] = {};
+    for (uint32_t slot = 0; slot < kMaxPointShadowSlots; slot++) {
+        nearFar[slot][0] = d->pointShadowNear[slot];
+        nearFar[slot][1] = d->pointShadowFar[slot];
+    }
+    if (SLANG_FAILED(c["gPointShadowNearFar"].setData(nearFar))) return false;
+    return true;
+}
+
 static bool uploadCascadeUniforms(ShaderCursor& c, FrameData* d)
 {
     if (!uploadAndBindCascadeMatrices(c, d)) return false;
@@ -102,6 +140,7 @@ static bool updateForwardPassUniforms(ShaderCursor& c, FrameData* d)
     ff.enableDirLight = d->features.dirLight ? 1u : 0u;
     ff.enableDirShadow = d->features.dirShadows ? 1u : 0u;
     ff.enablePointLights = d->features.pointLights ? 1u : 0u;
+    ff.enablePointShadows = d->features.pointShadows ? 1u : 0u;
     ff.enableSSGI = d->features.ssgi ? 1u : 0u;
     ff.enableFog = d->features.fog ? 1u : 0u;
     ff.pointLightCount = d->features.pointLights ? d->features.pointLightCount : 0u;
@@ -112,7 +151,9 @@ static bool updateForwardPassUniforms(ShaderCursor& c, FrameData* d)
 
     if (SLANG_FAILED(c["enableDirShadowFlag"].setData(d->features.dirShadows ? 1u : 0u))) return false;
     if (SLANG_FAILED(c["enableDirLightFlag"].setData(d->features.dirLight ? 1u : 0u))) return false;
+    if (SLANG_FAILED(c["enablePointShadowFlag"].setData(d->features.pointShadows ? 1u : 0u))) return false;
     if (!uploadCascadeUniforms(c, d)) return false;
+    if (!uploadPointShadowUniforms(c, d)) return false;
     if (d->diagShadow) {
         printf("[diag] cascade0 viewProj[0]=%.6f splitFar=%.1f\n",
                d->cascadeShadows[0].viewProj[0], d->cascadeShadows[0].splitFar);
@@ -177,8 +218,14 @@ void shadowPassCallback(GpuGraphPassContext* ctx, void* userData)
             if (!bindCascadeMatrixBuffer(c, d, d->diagShadow ? "shadowCascadeViewProjs" : nullptr)) return;
             if (SLANG_FAILED(c["shadowCascadeIndex"].setData((uint32_t)passData->cascadeIndex))) return;
         } else {
+            const int slot = passData->pointShadowSlot;
             if (SLANG_FAILED(c["shadowCascadeIndex"].setData(4u))) return;
-            c["shadowViewProj"].setData(d->pointShadowViewProj[passData->pointShadowSlot][passData->cubeFace]);
+            c["shadowViewProj"].setData(d->pointShadowViewProj[slot][passData->cubeFace]);
+            float lightPos[3] = {d->pointShadowLightPos[slot][0], d->pointShadowLightPos[slot][1],
+                                 d->pointShadowLightPos[slot][2]};
+            if (SLANG_FAILED(c["pointShadowLightPos"].setData(lightPos))) return;
+            float nearFar[2] = {d->pointShadowNear[slot], d->pointShadowFar[slot]};
+            if (SLANG_FAILED(c["pointShadowNearFar"].setData(nearFar))) return;
         }
     }
 

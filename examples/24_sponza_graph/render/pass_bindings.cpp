@@ -38,6 +38,36 @@ static bool bindShadowResources(rhi::ShaderCursor cursor, const FrameData& frame
     return ok;
 }
 
+static bool bindPointShadowResources(rhi::ShaderCursor cursor, const FrameData& frame, bool logFailures)
+{
+    if (!frame.device || !frame.resources) return false;
+    const RenderResources& res = *frame.resources;
+    const char* cubeNames[] = {
+        "pointShadowCube0", "pointShadowCube1", "pointShadowCube2", "pointShadowCube3",
+        "pointShadowCube4", "pointShadowCube5", "pointShadowCube6", "pointShadowCube7",
+    };
+    bool ok = true;
+    for (uint32_t i = 0; i < kMaxPointShadowSlots; i++) {
+        auto* view = static_cast<rhi::ITextureView*>(frame.device->textureViewPool.resolve(
+            res.pointShadowCubeSRV[i].index, res.pointShadowCubeSRV[i].generation));
+        ok = shaderCursorSetBinding(cursor, cubeNames[i], view, logFailures ? cubeNames[i] : nullptr) && ok;
+    }
+    auto* sampler = static_cast<rhi::ISampler*>(frame.device->samplerPool.resolve(
+        res.pointShadowDepthSampler.index, res.pointShadowDepthSampler.generation));
+    ok = shaderCursorSetBinding(cursor, "pointShadowDepthSampler", sampler,
+                                logFailures ? "pointShadowDepthSampler" : nullptr) &&
+         ok;
+    return ok;
+}
+
+static bool bindPointLightBuffer(rhi::ShaderCursor cursor, const FrameData& frame, bool logFailures)
+{
+    if (!frame.device || !frame.resources) return false;
+    auto* buf = static_cast<rhi::IBuffer*>(frame.device->bufferPool.resolve(
+        frame.resources->lightBuffer.index, frame.resources->lightBuffer.generation));
+    return shaderCursorSetBinding(cursor, "pointLights", buf, logFailures ? "pointLights" : nullptr);
+}
+
 static bool bindForwardPassResources(rhi::IShaderObject* root, const FrameData& frame, bool logFailures)
 {
     if (!root) return false;
@@ -48,9 +78,11 @@ static bool bindForwardPassResources(rhi::IShaderObject* root, const FrameData& 
     // Graphics pass: direct RHI binding (same as 21_sponza_data_driven). Bindless heap still validates descriptors.
     ok = bindBaseColorArrayBindings(c, frame, logFailures) && ok;
     ok = bindShadowResources(c, frame, logFailures) && ok;
+    if (frame.features.pointShadows)
+        ok = bindPointShadowResources(c, frame, logFailures) && ok;
 
-    ok = shaderCursorSetBindlessHeap(c, "pointLights", res.bufferBindlessHeap, res.bindless.lightBuffer,
-                                       logFailures ? "pointLights" : nullptr) && ok;
+    if (frame.features.pointLights)
+        ok = bindPointLightBuffer(c, frame, logFailures) && ok;
     ok = shaderCursorSetBindlessHeap(c, "ssgiTexture", res.textureBindlessHeap, res.bindless.ssgiTexture,
                                        logFailures ? "ssgiTexture" : nullptr) && ok;
     ok = shaderCursorSetBindlessHeap(c, "ssgiSampler", res.samplerBindlessHeap, res.bindless.linearSampler,
@@ -103,10 +135,22 @@ static bool bindLightCullPassResources(rhi::IShaderObject* root, const FrameData
     return ok;
 }
 
-bool bindForwardShadowResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)
+bool bindForwardFrameResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)
 {
     if (!pipelines.forwardRootObj) return false;
-    return bindShadowResources(rhi::ShaderCursor(pipelines.forwardRootObj.get()), frame, logFailures);
+    ShaderCursor c(pipelines.forwardRootObj.get());
+    bool ok = bindBaseColorArrayBindings(c, frame, logFailures);
+    ok = bindShadowResources(c, frame, logFailures) && ok;
+    if (frame.features.pointShadows)
+        ok = bindPointShadowResources(c, frame, logFailures) && ok;
+    if (frame.features.pointLights)
+        ok = bindPointLightBuffer(c, frame, logFailures) && ok;
+    return ok;
+}
+
+bool bindForwardShadowResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)
+{
+    return bindForwardFrameResources(pipelines, frame, logFailures);
 }
 
 bool bindAllPassResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)

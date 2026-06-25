@@ -182,11 +182,14 @@ static bool createMaterialTextureArray(GpuDevice device, const std::vector<uint8
 bool createSimpleMaterialTextures(GpuDevice device, MaterialTextures& out)
 {
     constexpr uint32_t ls = 256;
-    constexpr uint32_t lc = 2;
+    constexpr uint32_t lc = 5;
     std::vector<uint8_t> px((size_t)lc * ls * ls * 4);
 
     fillCheckerLayer(px.data() + 0 * ls * ls * 4, ls, ls, 210, 210, 215, 120, 120, 128, 64);
     fillSolidLayer(px.data() + 1 * ls * ls * 4, ls, ls, 210, 95, 75);
+    fillSolidLayer(px.data() + 2 * ls * ls * 4, ls, ls, 175, 178, 188);
+    fillSolidLayer(px.data() + 3 * ls * ls * 4, ls, ls, 70, 130, 185);
+    fillSolidLayer(px.data() + 4 * ls * ls * 4, ls, ls, 95, 175, 95);
 
     if (!createMaterialTextureArray(device, px, lc, ls, out, "simple_texarray")) {
         printf("Simple texture array failed\n");

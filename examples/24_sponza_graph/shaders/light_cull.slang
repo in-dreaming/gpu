@@ -20,7 +20,10 @@ struct PointLightData
     float radius;
     float3 color;
     int shadowMapIndex;
-    uint pad0;
+    uint spotEnable;
+    float3 direction;
+    float innerConeCos;
+    float outerConeCos;
 };
 
 struct LightCullParams
