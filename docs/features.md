@@ -274,7 +274,7 @@ ctest --test-dir build -C Release --output-on-failure
 2. **Barrier**：全功能 hazard resolver（subresource alias、跨队列 ownership 诊断）仍在演进。
 3. **Transient**：除 Vulkan placed heap 原型外，通用 heap allocator / 资源 aliasing 尚未完全落地。
 4. **WebGPU / D3D11**：无真实多队列，async compute 无硬件并行收益。
-5. **示例 25**：Win32 子系统应用，`printf` 输出可能不可见；以 exit code 与 phaseC 测试为准。
+5. **示例 25**：Win32 子系统应用；CI / MSVC 下已链接 `CONSOLE` 子系统以便查看 `printf`。
 
 ---
 

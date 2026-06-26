@@ -1,25 +1,131 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Trim optional slang-rhi backends to keep CI build times reasonable.
+  SLANG_RHI_ENABLE_WGPU: OFF
+  SLANG_RHI_ENABLE_CUDA: OFF
+  SLANG_RHI_ENABLE_D3D11: OFF
+  SLANG_RHI_ENABLE_OPTIX: OFF
+  GPU_BUILD_TESTS: ON
+  GPU_BUILD_EXAMPLES: OFF
+  GPU_INSTALL: OFF
+
 jobs:
-  build:
+  build-test:
+    name: ${{ matrix.name }} / ${{ matrix.config }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        config: [Debug, Release]
-    runs-on: ${{ matrix.os }}
+        include:
+          - name: Windows
+            runs-on: windows-latest
+            config: Release
+          - name: Windows
+            runs-on: windows-latest
+            config: Debug
+          - name: Linux
+            runs-on: ubuntu-latest
+            config: Release
+          - name: Linux
+            runs-on: ubuntu-latest
+            config: Debug
+          - name: macOS
+            runs-on: macos-latest
+            config: Release
+          - name: macOS
+            runs-on: macos-latest
+            config: Debug
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup CMake and Ninja
+        uses: lukka/get-cmake@latest
+
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libwayland-dev libxkbcommon-dev libegl-dev libdbus-1-dev libibus-1.0-dev fcitx-libs-dev
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libwayland-dev libxkbcommon-dev libegl-dev libdbus-1-dev libibus-1.0-dev \
+            mesa-vulkan-drivers vulkan-tools libvulkan1 xvfb
+
+      - name: Setup Vulkan SDK
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        uses: lunarg/setup-vulkan@v1
+        with:
+          vulkan-version: 1.3.290.0
+
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DGPU_BUILD_TESTS=ON
+        shell: bash
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DGPU_BUILD_TESTS=${{ env.GPU_BUILD_TESTS }} \
+            -DGPU_BUILD_EXAMPLES=${{ env.GPU_BUILD_EXAMPLES }} \
+            -DGPU_INSTALL=${{ env.GPU_INSTALL }} \
+            -DSLANG_RHI_ENABLE_WGPU=${{ env.SLANG_RHI_ENABLE_WGPU }} \
+            -DSLANG_RHI_ENABLE_CUDA=${{ env.SLANG_RHI_ENABLE_CUDA }} \
+            -DSLANG_RHI_ENABLE_D3D11=${{ env.SLANG_RHI_ENABLE_D3D11 }} \
+            -DSLANG_RHI_ENABLE_OPTIX=${{ env.SLANG_RHI_ENABLE_OPTIX }}
+
       - name: Build
-        run: cmake --build build --config ${{ matrix.config }}
+        shell: bash
+        run: cmake --build build --parallel
+
       - name: Test
-        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure --timeout 30
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a ctest --test-dir build --output-on-failure --timeout 300 --parallel 2
+          else
+            ctest --test-dir build --output-on-failure --timeout 300 --parallel 2
+          fi
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs-${{ matrix.name }}-${{ matrix.config }}
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
+          if-no-files-found: ignore
+
+  ci-success:
+    name: CI success
+    runs-on: ubuntu-latest
+    needs: build-test
+    if: always()
+    steps:
+      - name: Check matrix results
+        run: |
+          if [ "${{ needs.build-test.result }}" != "success" ]; then
+            echo "One or more CI jobs failed."
+            exit 1
+          fi

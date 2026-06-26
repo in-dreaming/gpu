@@ -1,5 +1,7 @@
 # gpu
 
+[![CI](https://github.com/in-dreaming/gpu/actions/workflows/ci.yml/badge.svg)](https://github.com/in-dreaming/gpu/actions/workflows/ci.yml)
+
 A **C11 GPU abstraction layer** built on [Slang](https://github.com/shader-slang/slang) and [slang-rhi](https://github.com/shader-slang/slang-rhi), with SDL3 for cross-platform windowing.
 
 **[特性说明文档 (Features)](docs/features.md)** · [RenderGraph 改造计划](docs/rhi_rendergraph_completion_plan.md)
@@ -38,6 +40,16 @@ cmake -B build -DGPU_BUILD_TESTS=ON
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+CI uses the same flow on **Windows / Linux / macOS** (Ninja, Vulkan SDK on Linux/macOS, `ctest` for `smoke` + `phase1`–`phaseE`). Local parity:
+
+```bash
+cmake --preset ci-release
+cmake --build --preset ci-release
+ctest --preset ci
+```
+
+See [.github/workflows/ci.yml](.github/workflows/ci.yml) for the full matrix (Debug + Release per OS).
 
 Key regression suites:
 

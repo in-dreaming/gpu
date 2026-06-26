@@ -1,0 +1,76 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "GPU_BUILD_TESTS": "ON",
+        "GPU_BUILD_EXAMPLES": "OFF",
+        "GPU_INSTALL": "OFF",
+        "SLANG_RHI_ENABLE_WGPU": "OFF",
+        "SLANG_RHI_ENABLE_CUDA": "OFF",
+        "SLANG_RHI_ENABLE_D3D11": "OFF",
+        "SLANG_RHI_ENABLE_OPTIX": "OFF"
+      }
+    },
+    {
+      "name": "ci-release",
+      "inherits": "base",
+      "displayName": "CI Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ci-debug",
+      "inherits": "base",
+      "displayName": "CI Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "Developer (examples on)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "GPU_BUILD_EXAMPLES": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "ci-release",
+      "configurePreset": "ci-release"
+    },
+    {
+      "name": "ci-debug",
+      "configurePreset": "ci-debug"
+    },
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "ci",
+      "configurePreset": "ci-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 300
+      }
+    }
+  ]
+}
