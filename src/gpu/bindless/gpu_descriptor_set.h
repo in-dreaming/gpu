@@ -2,6 +2,8 @@
 
 #include "gpu/core/gpu_types.h"
 #include "gpu/core/gpu_handle.h"
+#include "gpu/core/gpu_command.h"
+#include "gpu/core/gpu_sampler.h"
 #include "gpu/layout/gpu_pipeline_layout.h"
 #include "gpu/bindless/gpu_bindless_heap.h"
 
@@ -35,6 +37,58 @@ typedef struct {
 void gpuGetDescriptorPoolStats(GpuDescriptorPool pool, GpuDescriptorPoolStats* outStats);
 
 // ============================================================================
+// Descriptor Set - traditional set / binding mode
+// ============================================================================
+
+typedef struct GpuDescriptorSet_t* GpuDescriptorSet;
+
+typedef enum {
+    GPU_DESCRIPTOR_WRITE_BUFFER = 0,
+    GPU_DESCRIPTOR_WRITE_TEXTURE = 1,
+    GPU_DESCRIPTOR_WRITE_SAMPLER = 2,
+} GpuDescriptorWriteType;
+
+typedef struct {
+    GpuDescriptorWriteType type;
+    GpuBufferHandle buffer;
+    uint64_t bufferOffset;
+    uint64_t bufferRange;
+    GpuTextureHandle texture;
+    GpuSamplerHandle sampler;
+} GpuDescriptorWrite;
+
+GpuResult gpuAllocateDescriptorSet(
+    GpuDescriptorPool pool,
+    GpuPipelineLayout layout,
+    uint32_t setIndex,
+    GpuDescriptorSet* outSet);
+
+void gpuFreeDescriptorSet(GpuDescriptorSet set);
+
+GpuResult gpuUpdateDescriptorSet(
+    GpuDescriptorSet set,
+    uint32_t binding,
+    uint32_t arrayIndex,
+    const GpuDescriptorWrite* write);
+
+GpuResult gpuUpdateDescriptorSetByName(
+    GpuDescriptorSet set,
+    const char* bindingName,
+    const GpuDescriptorWrite* write);
+
+void gpuCmdBindDescriptorSet(
+    GpuCommandBuffer cmd,
+    GpuPipelineLayout layout,
+    uint32_t setIndex,
+    GpuDescriptorSet set);
+
+void gpuCmdBindDescriptorSetPass(
+    GpuRenderPassEncoder pass,
+    GpuPipelineLayout layout,
+    uint32_t setIndex,
+    GpuDescriptorSet set);
+
+// ============================================================================
 // Bindless Heap - Extended API (Phase D)
 // ============================================================================
 
@@ -63,6 +117,8 @@ void gpuGetBindlessHeapStats(GpuBindlessHeap heap, GpuBindlessHeapStats* outStat
 // This is the real implementation of gpuGetBindlessIndex that actually tracks allocations
 uint32_t gpuBindlessRegister(GpuBindlessHeap heap, GpuHandle resource, GpuDescriptorType type);
 void gpuBindlessUnregister(GpuBindlessHeap heap, uint32_t index);
+GpuResult gpuBindlessGetSlotType(GpuBindlessHeap heap, uint32_t index, GpuDescriptorType* outType);
+GpuResult gpuBindlessValidateSlot(GpuBindlessHeap heap, uint32_t index, GpuDescriptorType expectedType);
 
 #ifdef __cplusplus
 }

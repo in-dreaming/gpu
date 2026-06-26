@@ -19,6 +19,19 @@ typedef struct GpuBindlessHeap_t* GpuBindlessHeap;
 typedef struct GpuPipelineCache_t* GpuPipelineCache;
 struct GpuTensorData;
 
+struct GpuPooledTransientTexture {
+    GpuTextureDesc desc;
+    GpuTextureHandle texture;
+    GpuTextureHandle rtView;
+    bool inUse;
+};
+
+struct GpuPooledTransientBuffer {
+    GpuBufferDesc desc;
+    GpuBufferHandle buffer;
+    bool inUse;
+};
+
 struct GpuSubresourceStateRecord_t;
 typedef GpuSubresourceStateRecord_t* GpuSubresourceTracker;
 
@@ -27,6 +40,8 @@ struct GpuDevice_t {
     rhi::ComPtr<rhi::ICommandQueue> graphicsQueue;
     rhi::ComPtr<rhi::ICommandQueue> computeQueue;
     rhi::ComPtr<rhi::ICommandQueue> transferQueue;
+    bool computeQueueIsAlias = false;
+    bool transferQueueIsAlias = false;
     GpuFrameContext frameContext;
     GpuHandlePool<rhi::IBuffer> bufferPool;
     GpuHandlePool<rhi::ITexture> texturePool;
@@ -61,6 +76,9 @@ struct GpuDevice_t {
 
     // Per-device pipeline cache (Phase D fix)
     GpuPipelineCache pipelineCache = nullptr;
+
+    std::vector<GpuPooledTransientTexture> pooledTransientTextures;
+    std::vector<GpuPooledTransientBuffer> pooledTransientBuffers;
 };
 
 struct GpuCommandEncoder_t {
@@ -123,6 +141,7 @@ struct GpuSurfaceTexture_t {
 struct GpuRenderPassEncoder_t {
     rhi::ComPtr<rhi::IRenderPassEncoder> rhiPassEncoder;
     GpuDevice device;
+    rhi::IShaderObject* rootShaderObject = nullptr;
 };
 
 struct GpuRenderPipeline_t {
@@ -171,6 +190,8 @@ struct GpuTensorData {
     size_t logicalSize;
     GpuTensorStorage* storage;
 };
+
+void gpuFinalizeCommandBuffer(GpuCommandBuffer_t* buf);
 
 static inline rhi::Format gpuFormatToRhi(GpuFormat fmt)
 {

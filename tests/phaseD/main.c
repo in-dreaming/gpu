@@ -681,6 +681,181 @@ int main(void)
     }
     printf("  OK\n"); flush();
 
+    // =========================================================================
+    // [D.17] Descriptor set allocate / update / validation
+    // =========================================================================
+    printf("[D.17] Descriptor set API\n"); flush();
+    {
+        GpuShaderCompileDesc cdesc = {
+            .sourcePath = "reflection_test.slang",
+            .entryPoint = "vertexMain",
+            .fragmentEntryPoint = "fragmentMain",
+            .target = GPU_SHADER_TARGET_SPIRV,
+        };
+        GpuShaderProgram prog = NULL;
+        CHECK(gpuCompileShader(compiler, &cdesc, &prog));
+
+        GpuPipelineLayout layout = NULL;
+        CHECK(gpuReflectPipelineLayout(prog, &layout));
+
+        GpuDescriptorPoolDesc pdesc = { .maxSets = 16, .maxBindingsPerSet = 32 };
+        GpuDescriptorPool pool = NULL;
+        CHECK(gpuCreateDescriptorPool(device, &pdesc, &pool));
+
+        GpuDescriptorSet set = NULL;
+        CHECK(gpuAllocateDescriptorSet(pool, layout, 0, &set));
+        CHECK_TRUE(set != NULL);
+
+        GpuBufferDesc bdesc = {
+            .size = 256, .elementSize = 16,
+            .usage = GPU_BUFFER_USAGE_CONSTANT_BUFFER | GPU_BUFFER_USAGE_SHADER_RESOURCE,
+            .label = "desc_set_buf"
+        };
+        GpuBufferHandle buf = {0, 0};
+        CHECK(gpuCreateBuffer(device, &bdesc, &buf));
+
+        GpuDescriptorWrite wBuf = { .type = GPU_DESCRIPTOR_WRITE_BUFFER, .buffer = buf };
+        CHECK(gpuUpdateDescriptorSet(set, 0, 0, &wBuf));
+
+        GpuBufferDesc vdesc = {
+            .size = 1024, .elementSize = 16,
+            .usage = GPU_BUFFER_USAGE_SHADER_RESOURCE,
+            .label = "desc_set_vertices"
+        };
+        GpuBufferHandle vbuf = {0, 0};
+        CHECK(gpuCreateBuffer(device, &vdesc, &vbuf));
+        GpuDescriptorWrite wVert = { .type = GPU_DESCRIPTOR_WRITE_BUFFER, .buffer = vbuf };
+        CHECK(gpuUpdateDescriptorSet(set, 1, 0, &wVert));
+
+        GpuDescriptorWrite bad = { .type = GPU_DESCRIPTOR_WRITE_TEXTURE, .texture = {1, 1} };
+        CHECK_TRUE(gpuUpdateDescriptorSet(set, 0, 0, &bad) == GPU_ERROR_INVALID_ARGS);
+
+        gpuDestroyBuffer(device, vbuf);
+
+        gpuFreeDescriptorSet(set);
+        gpuDestroyBuffer(device, buf);
+        gpuDestroyDescriptorPool(pool);
+        gpuDestroyPipelineLayout(layout);
+        gpuDestroyShaderProgram(prog);
+    }
+    printf("  OK\n"); flush();
+
+    // =========================================================================
+    // [D.18] Mixed bindless heap per-slot type
+    // =========================================================================
+    printf("[D.18] Mixed bindless heap\n"); flush();
+    {
+        GpuBindlessHeapDesc2 hdesc2 = {
+            .maxTextures = 8,
+            .maxBuffers = 8,
+            .maxSamplers = 4,
+            .shaderVisible = true,
+        };
+        GpuBindlessHeap heap = NULL;
+        CHECK(gpuCreateBindlessHeap2(device, &hdesc2, &heap));
+
+        GpuTextureDesc tdesc = {
+            .type = GPU_TEXTURE_TYPE_2D, .width = 16, .height = 16, .depth = 1,
+            .arrayLength = 1, .mipCount = 1, .format = GPU_FORMAT_RGBA8_UNORM,
+            .sampleCount = 1, .usage = GPU_TEXTURE_USAGE_SHADER_RESOURCE,
+            .label = "mixed_tex"
+        };
+        GpuTextureHandle tex = {0, 0};
+        CHECK(gpuCreateTexture(device, &tdesc, &tex));
+
+        GpuBufferDesc bdesc = {
+            .size = 128, .elementSize = 4,
+            .usage = GPU_BUFFER_USAGE_SHADER_RESOURCE,
+            .label = "mixed_buf"
+        };
+        GpuBufferHandle buf = {0, 0};
+        CHECK(gpuCreateBuffer(device, &bdesc, &buf));
+
+        GpuSamplerDesc sdesc = {
+            .minFilter = GPU_FILTER_LINEAR, .magFilter = GPU_FILTER_LINEAR,
+            .mipFilter = GPU_FILTER_LINEAR,
+            .addressModeU = GPU_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeV = GPU_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = GPU_SAMPLER_ADDRESS_MODE_REPEAT,
+            .label = "mixed_sampler"
+        };
+        GpuSamplerHandle sampler = {0, 0};
+        CHECK(gpuCreateSampler(device, &sdesc, &sampler));
+
+        uint32_t texIdx = gpuBindlessRegister(heap, (GpuHandle){tex.index, tex.generation}, GPU_DESCRIPTOR_TYPE_TEXTURE);
+        uint32_t bufIdx = gpuBindlessRegister(heap, (GpuHandle){buf.index, buf.generation}, GPU_DESCRIPTOR_TYPE_BUFFER);
+        uint32_t sampIdx = gpuBindlessRegister(heap, (GpuHandle){sampler.index, sampler.generation}, GPU_DESCRIPTOR_TYPE_SAMPLER);
+        CHECK_TRUE(texIdx != UINT32_MAX);
+        CHECK_TRUE(bufIdx != UINT32_MAX);
+        CHECK_TRUE(sampIdx != UINT32_MAX);
+
+        GpuDescriptorType slotType = 0;
+        CHECK(gpuBindlessGetSlotType(heap, texIdx, &slotType));
+        CHECK_TRUE(slotType == GPU_DESCRIPTOR_TYPE_TEXTURE);
+        CHECK(gpuBindlessValidateSlot(heap, bufIdx, GPU_DESCRIPTOR_TYPE_BUFFER));
+        CHECK_TRUE(gpuBindlessValidateSlot(heap, texIdx, GPU_DESCRIPTOR_TYPE_BUFFER) == GPU_ERROR_INVALID_ARGS);
+
+        GpuBindlessHeapStats stats;
+        gpuGetBindlessHeapStats(heap, &stats);
+        CHECK_TRUE(stats.allocatedTextures == 1);
+        CHECK_TRUE(stats.allocatedBuffers == 1);
+        CHECK_TRUE(stats.allocatedSamplers == 1);
+        CHECK_TRUE(stats.totalAllocated == 3);
+
+        gpuBindlessUnregister(heap, texIdx);
+        gpuBindlessUnregister(heap, bufIdx);
+        gpuBindlessUnregister(heap, sampIdx);
+        gpuDestroySampler(device, sampler);
+        gpuDestroyBuffer(device, buf);
+        gpuDestroyTexture(device, tex);
+        gpuDestroyBindlessHeap(heap);
+    }
+    printf("  OK\n"); flush();
+
+    // =========================================================================
+    // [D.19] Descriptor set update by binding name
+    // =========================================================================
+    printf("[D.19] Descriptor set by name\n"); flush();
+    {
+        GpuShaderCompileDesc cdesc = {
+            .sourcePath = "reflection_test.slang",
+            .entryPoint = "vertexMain",
+            .fragmentEntryPoint = "fragmentMain",
+            .target = GPU_SHADER_TARGET_SPIRV,
+        };
+        GpuShaderProgram prog = NULL;
+        CHECK(gpuCompileShader(compiler, &cdesc, &prog));
+
+        GpuPipelineLayout layout = NULL;
+        CHECK(gpuReflectPipelineLayout(prog, &layout));
+
+        GpuDescriptorPoolDesc pdesc = { .maxSets = 8, .maxBindingsPerSet = 16 };
+        GpuDescriptorPool pool = NULL;
+        CHECK(gpuCreateDescriptorPool(device, &pdesc, &pool));
+
+        GpuDescriptorSet set = NULL;
+        CHECK(gpuAllocateDescriptorSet(pool, layout, 0, &set));
+
+        GpuBufferDesc bdesc = {
+            .size = 256, .elementSize = 16,
+            .usage = GPU_BUFFER_USAGE_CONSTANT_BUFFER,
+            .label = "named_cb"
+        };
+        GpuBufferHandle buf = {0, 0};
+        CHECK(gpuCreateBuffer(device, &bdesc, &buf));
+
+        GpuDescriptorWrite wBuf = { .type = GPU_DESCRIPTOR_WRITE_BUFFER, .buffer = buf };
+        CHECK(gpuUpdateDescriptorSetByName(set, "gUniforms", &wBuf));
+        CHECK_TRUE(gpuUpdateDescriptorSetByName(set, "missingBinding", &wBuf) == GPU_ERROR_NOT_FOUND);
+
+        gpuFreeDescriptorSet(set);
+        gpuDestroyBuffer(device, buf);
+        gpuDestroyDescriptorPool(pool);
+        gpuDestroyPipelineLayout(layout);
+        gpuDestroyShaderProgram(prog);
+    }
+    printf("  OK\n"); flush();
+
     // Cleanup
     gpuDestroyShaderCompiler(compiler);
     gpuDestroyDevice(device);

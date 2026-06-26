@@ -134,6 +134,9 @@ void gpuDestroyQueryPool(GpuDevice device, GpuQueryPool pool);
 GpuResult gpuQueryPoolGetResults(GpuQueryPool pool, uint32_t startIndex, uint32_t count, uint64_t* outData);
 GpuResult gpuQueryPoolReset(GpuQueryPool pool, uint32_t startIndex, uint32_t count);
 void gpuCmdWriteTimestamp(GpuCommandBuffer cmd, GpuQueryPool pool, uint32_t queryIndex);
+void gpuCmdWriteTimestampEncoder(GpuCommandEncoder encoder, GpuQueryPool pool, uint32_t queryIndex);
+void gpuCmdWriteRenderTimestamp(GpuRenderPassEncoder pass, GpuQueryPool pool, uint32_t queryIndex);
+void gpuCmdWriteComputeTimestamp(GpuComputePassEncoder pass, GpuQueryPool pool, uint32_t queryIndex);
 
 #ifdef __cplusplus
 }

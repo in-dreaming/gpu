@@ -113,11 +113,14 @@ GpuResult gpuQueueSubmitWithSync(GpuCommandQueue queue,
     
     // Command buffers
     rhi::ICommandBuffer* rhiCmds[16] = {};
+    GpuCommandBuffer_t* cmdWrappers[16] = {};
     uint32_t count = cmdCount < 16 ? cmdCount : 16;
     for (uint32_t i = 0; i < count; i++) {
         if (cmds[i]) {
             GpuCommandBuffer_t* cmdBuf = static_cast<GpuCommandBuffer_t*>(cmds[i]);
+            gpuFinalizeCommandBuffer(cmdBuf);
             rhiCmds[i] = cmdBuf->rhiCmdBuffer;
+            cmdWrappers[i] = cmdBuf;
         }
     }
     desc.commandBuffers = rhiCmds;
@@ -129,7 +132,6 @@ GpuResult gpuQueueSubmitWithSync(GpuCommandQueue queue,
     uint32_t numWaits = waitCount < 8 ? waitCount : 8;
     for (uint32_t i = 0; i < numWaits && waits; i++) {
         if (waits[i].fence) {
-            // Access the RHI fence from GpuFence wrapper
             GpuFence_t* fenceWrapper = reinterpret_cast<GpuFence_t*>(waits[i].fence);
             if (fenceWrapper && fenceWrapper->rhiFence) {
                 waitFences[i] = fenceWrapper->rhiFence.get();
@@ -140,6 +142,9 @@ GpuResult gpuQueueSubmitWithSync(GpuCommandQueue queue,
     desc.waitFences = waitFences;
     desc.waitFenceValues = waitValues;
     desc.waitFenceCount = numWaits;
+    for (uint32_t i = 0; i < numWaits; i++) {
+        if (!waitFences[i]) return GPU_ERROR_INVALID_PARAMETER;
+    }
     
     // Signal fences
     rhi::IFence* signalFences[8] = {};
@@ -156,6 +161,14 @@ GpuResult gpuQueueSubmitWithSync(GpuCommandQueue queue,
     }
     
     rhi::Result result = rhiQueue->submit(desc);
+
+    for (uint32_t i = 0; i < count; i++) {
+        if (cmdWrappers[i]) {
+            cmdWrappers[i]->rhiCmdBuffer = nullptr;
+            cmdWrappers[i]->rhiEncoder = nullptr;
+            delete cmdWrappers[i];
+        }
+    }
     
     return SLANG_SUCCEEDED(result) ? GPU_OK : GPU_ERROR_UNKNOWN;
 }
@@ -277,6 +290,25 @@ void gpuCmdWriteTimestamp(GpuCommandBuffer cmd, GpuQueryPool pool, uint32_t quer
     } else if (cmd->inRayTracingPass && cmd->rtPassEncoder) {
         cmd->rtPassEncoder->writeTimestamp(pool->rhiPool, queryIndex);
     }
+}
+
+void gpuCmdWriteTimestampEncoder(GpuCommandEncoder encoder, GpuQueryPool pool, uint32_t queryIndex)
+{
+    if (!encoder || !pool) return;
+    encoder->rhiEncoder->writeTimestamp(pool->rhiPool, queryIndex);
+}
+
+void gpuCmdWriteRenderTimestamp(GpuRenderPassEncoder pass, GpuQueryPool pool, uint32_t queryIndex)
+{
+    if (!pass || !pool) return;
+    pass->rhiPassEncoder->writeTimestamp(pool->rhiPool, queryIndex);
+}
+
+void gpuCmdWriteComputeTimestamp(GpuComputePassEncoder pass, GpuQueryPool pool, uint32_t queryIndex)
+{
+    if (!pass || !pool) return;
+    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
+    rhiPass->writeTimestamp(pool->rhiPool, queryIndex);
 }
 
 

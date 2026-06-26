@@ -20,6 +20,7 @@ typedef int32_t GpuResult;
 #define GPU_ERROR_UNKNOWN       -6
 #define GPU_ERROR_NOT_FOUND     -7
 #define GPU_ERROR_TIMEOUT       -8
+#define GPU_ERROR_BUFFER_TOO_SMALL -9
 
 #ifdef __cplusplus
 }

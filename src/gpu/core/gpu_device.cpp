@@ -2,6 +2,7 @@
 #include "gpu/core/gpu_command.h"
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_texture.h"
+#include "gpu/core/gpu_backend.h"
 #include "gpu/core/gpu_internal.h"
 #include <vector>
 #include <cstdlib>
@@ -63,15 +64,24 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
 
     rhi::ComPtr<rhi::ICommandQueue> queue;
     if (SLANG_FAILED(rhiDevice->getQueue(rhi::QueueType::Graphics, queue.writeRef())) || !queue) {
-        rhiDevice = nullptr;
+        delete device;
         return GPU_ERROR_DEVICE_LOST;
     }
     device->graphicsQueue = queue;
-    
-    // slang-rhi only has Graphics queue type - the same queue handles all operations
-    // Set compute and transfer to point to the same graphics queue
-    device->computeQueue = queue;
-    device->transferQueue = queue;
+
+    auto assignQueue = [&](rhi::QueueType type, rhi::ComPtr<rhi::ICommandQueue>& outQueue, bool& outIsAlias) {
+        rhi::ComPtr<rhi::ICommandQueue> q;
+        if (SLANG_SUCCEEDED(rhiDevice->getQueue(type, q.writeRef())) && q) {
+            outQueue = q;
+            outIsAlias = (q.get() == device->graphicsQueue.get());
+        } else {
+            outQueue = device->graphicsQueue;
+            outIsAlias = true;
+        }
+    };
+
+    assignQueue(rhi::QueueType::Compute, device->computeQueue, device->computeQueueIsAlias);
+    assignQueue(rhi::QueueType::Transfer, device->transferQueue, device->transferQueueIsAlias);
 
     *outDevice = device;
     return GPU_SUCCESS;
@@ -120,6 +130,13 @@ void gpuDestroyDevice(GpuDevice device)
     }
 
     gpuQueueWaitOnHost((GpuCommandQueue)device->graphicsQueue.get());
+    if (!device->computeQueueIsAlias && device->computeQueue) {
+        gpuQueueWaitOnHost((GpuCommandQueue)device->computeQueue.get());
+    }
+    if (!device->transferQueueIsAlias && device->transferQueue &&
+        device->transferQueue.get() != device->computeQueue.get()) {
+        gpuQueueWaitOnHost((GpuCommandQueue)device->transferQueue.get());
+    }
 
     for (uint32_t i = 1; i < poolCap; i++) {
         auto& slot = device->textureViewPool.slots[i];
@@ -135,6 +152,15 @@ void gpuDestroyDevice(GpuDevice device)
     }
 
     device->graphicsQueue = nullptr;
+    for (auto& entry : device->pooledTransientTextures) {
+        if (entry.rtView.index != 0) gpuDestroyTextureView(device, entry.rtView);
+        if (entry.texture.index != 0) gpuDestroyTexture(device, entry.texture);
+    }
+    device->pooledTransientTextures.clear();
+    for (auto& entry : device->pooledTransientBuffers) {
+        if (entry.buffer.index != 0) gpuDestroyBuffer(device, entry.buffer);
+    }
+    device->pooledTransientBuffers.clear();
     device->rhiDevice = nullptr;
     delete device;
 }
@@ -142,7 +168,7 @@ void gpuDestroyDevice(GpuDevice device)
 GpuResult gpuGetQueue(GpuDevice device, GpuQueueType type, GpuCommandQueue* outQueue)
 {
     if (!device || !outQueue) return GPU_ERROR_INVALID_ARGS;
-    
+
     switch (type) {
     case GPU_QUEUE_TYPE_GRAPHICS:
         *outQueue = (GpuCommandQueue)device->graphicsQueue.get();
@@ -160,6 +186,87 @@ GpuResult gpuGetQueue(GpuDevice device, GpuQueueType type, GpuCommandQueue* outQ
     }
 }
 
+GpuResult gpuGetQueueInfo(GpuDevice device, GpuQueueType type, GpuQueueInfo* outInfo)
+{
+    if (!device || !outInfo) return GPU_ERROR_INVALID_ARGS;
+
+    outInfo->type = type;
+    outInfo->familyIndex = 0;
+    outInfo->reason = "";
+
+    switch (type) {
+    case GPU_QUEUE_TYPE_GRAPHICS:
+        if (!device->graphicsQueue) {
+            outInfo->support = GPU_QUEUE_SUPPORT_UNAVAILABLE;
+            outInfo->reason = "Graphics queue unavailable";
+        } else {
+            outInfo->support = GPU_QUEUE_SUPPORT_DEDICATED;
+            outInfo->reason = "Dedicated graphics queue";
+        }
+        break;
+    case GPU_QUEUE_TYPE_COMPUTE:
+        if (!device->computeQueue) {
+            outInfo->support = GPU_QUEUE_SUPPORT_UNAVAILABLE;
+            outInfo->reason = "Compute queue unavailable";
+        } else if (device->computeQueueIsAlias) {
+            outInfo->support = GPU_QUEUE_SUPPORT_ALIAS_GRAPHICS;
+            switch (gpuGetBackendType(device)) {
+            case GPU_BACKEND_WGPU:
+                outInfo->reason = "WebGPU exposes a single queue";
+                break;
+            case GPU_BACKEND_D3D11:
+                outInfo->reason = "D3D11 immediate context aliases all queue types";
+                break;
+            case GPU_BACKEND_CPU:
+                outInfo->reason = "CPU backend serializes all queue types";
+                break;
+            case GPU_BACKEND_CUDA:
+                outInfo->reason = "CUDA backend uses one stream for all queue types";
+                break;
+            default:
+                outInfo->reason = "Compute queue aliases graphics queue (no independent async compute)";
+                break;
+            }
+        } else {
+            outInfo->support = GPU_QUEUE_SUPPORT_DEDICATED;
+            outInfo->reason = "Dedicated compute queue";
+        }
+        break;
+    case GPU_QUEUE_TYPE_TRANSFER:
+        if (!device->transferQueue) {
+            outInfo->support = GPU_QUEUE_SUPPORT_UNAVAILABLE;
+            outInfo->reason = "Transfer queue unavailable";
+        } else if (device->transferQueueIsAlias) {
+            outInfo->support = GPU_QUEUE_SUPPORT_ALIAS_GRAPHICS;
+            switch (gpuGetBackendType(device)) {
+            case GPU_BACKEND_WGPU:
+                outInfo->reason = "WebGPU exposes a single queue";
+                break;
+            case GPU_BACKEND_D3D11:
+                outInfo->reason = "D3D11 immediate context aliases all queue types";
+                break;
+            case GPU_BACKEND_CPU:
+                outInfo->reason = "CPU backend serializes all queue types";
+                break;
+            case GPU_BACKEND_CUDA:
+                outInfo->reason = "CUDA backend uses one stream for all queue types";
+                break;
+            default:
+                outInfo->reason = "Transfer queue aliases graphics queue (no independent async transfer)";
+                break;
+            }
+        } else {
+            outInfo->support = GPU_QUEUE_SUPPORT_DEDICATED;
+            outInfo->reason = "Dedicated transfer queue";
+        }
+        break;
+    default:
+        return GPU_ERROR_INVALID_ARGS;
+    }
+
+    return GPU_SUCCESS;
+}
+
 GpuCommandEncoder gpuBeginCommandEncoder(GpuDevice device, GpuCommandQueue queue)
 {
     if (!device || !queue) return nullptr;
@@ -175,7 +282,7 @@ GpuCommandEncoder gpuBeginCommandEncoder(GpuDevice device, GpuCommandQueue queue
     return enc;
 }
 
-static void finalizeCommandBuffer(GpuCommandBuffer_t* buf)
+void gpuFinalizeCommandBuffer(GpuCommandBuffer_t* buf)
 {
     if (!buf) return;
     if (buf->inRayTracingPass && buf->rtPassEncoder) {
@@ -240,7 +347,7 @@ GpuResult gpuQueueSubmit(GpuCommandQueue queue, uint32_t count, GpuCommandBuffer
     for (uint32_t i = 0; i < count; i++) {
         if (!cmdBuffers[i]) continue;
         GpuCommandBuffer_t* buf = static_cast<GpuCommandBuffer_t*>(cmdBuffers[i]);
-        finalizeCommandBuffer(buf);
+        gpuFinalizeCommandBuffer(buf);
         if (buf->rhiCmdBuffer) {
             rhiCmdBufs.push_back(buf->rhiCmdBuffer);
         }
@@ -343,7 +450,7 @@ void gpuCmdBindRenderPipeline(GpuRenderPassEncoder pass, GpuRenderPipeline pipel
 {
     if (!pass || !pipeline) return;
     auto* rhiPipe = static_cast<GpuRenderPipeline_t*>(pipeline)->rhiPipeline.get();
-    pass->rhiPassEncoder->bindPipeline(rhiPipe);
+    pass->rootShaderObject = pass->rhiPassEncoder->bindPipeline(rhiPipe);
 }
 
 void gpuCmdSetViewport(GpuRenderPassEncoder pass, float x, float y, float width, float height)

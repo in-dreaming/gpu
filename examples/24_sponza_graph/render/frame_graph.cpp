@@ -186,6 +186,9 @@ bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
     gpuGraphPassSetCallback(fp, forwardPassCallback, &fd);
 
     bool ok = true;
+    // Multi-pass bindless graph can exhaust slang-rhi transient descriptor arena in a single CB.
+    gpuGraphSetExecuteMode(graph, GPU_GRAPH_EXECUTE_PASS_SUBMIT);
+
     if (gpuGraphCompile(graph) != GPU_SUCCESS) {
         printf("Graph compile failed\n");
         ok = false;
@@ -198,6 +201,19 @@ bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
                 const char* name = gpuGraphGetPassName(graph, pi);
                 bool culled = gpuGraphIsPassCulled(graph, pi);
                 printf("  [%u] pass=%u name=%s culled=%d\n", si, pi, name ? name : "?", culled ? 1 : 0);
+            }
+            uint32_t allocCount = gpuGraphGetTransientAllocationCount(graph);
+            printf("[diag] transient allocations: %u (independent_queues=%d effective_mode=%d)\n",
+                   allocCount,
+                   gpuDeviceSupportsIndependentQueues(ctx.device) ? 1 : 0,
+                   (int)gpuGraphGetEffectiveExecuteMode(graph));
+            GpuTransientAllocationPlan plans[16];
+            uint32_t planCount = gpuGraphBuildTransientAllocationPlan(graph, plans, 16);
+            for (uint32_t ai = 0; ai < planCount; ai++) {
+                printf("  alloc[%u] kind=%u resources=%u passes=[%u,%u] pool=%u aliased=%d heap_placed=%d\n",
+                       plans[ai].allocationId, plans[ai].kind, plans[ai].resourceCount,
+                       plans[ai].firstUsePass, plans[ai].lastUsePass, plans[ai].poolIndex,
+                       plans[ai].objectAliased ? 1 : 0, plans[ai].heapPlaced ? 1 : 0);
             }
             gpuGraphExportJson(graph, "shadow_diag_graph.json");
         }

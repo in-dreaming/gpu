@@ -28,8 +28,11 @@
 
 // Resources
 #include "gpu/resource/gpu_barrier.h"
+#include "gpu/resource/gpu_hazard.h"
 #include "gpu/resource/gpu_resource_manager.h"
 #include "gpu/resource/gpu_readback.h"
+#include "gpu/resource/gpu_copy.h"
+#include "gpu/resource/gpu_transient_heap.h"
 #include "gpu/resource/gpu_streaming_manager.h"
 #include "gpu/resource/gpu_sparse_resource.h"
 
@@ -43,6 +46,7 @@
 #include "gpu/pipeline/gpu_pipeline_state.h"
 #include "gpu/pipeline/gpu_pipeline_cache.h"
 #include "gpu/pipeline/gpu_cmd_bind.h"
+#include "gpu/pipeline/gpu_compute_binding.h"
 #include "gpu/pipeline/gpu_mesh_pipeline.h"
 
 // Layout (Phase 2)

@@ -19,8 +19,11 @@ set(GPU_PUBLIC_HEADERS
     debug/gpu_debug_markers.h
     sync/gpu_fence.h
     resource/gpu_barrier.h
+    resource/gpu_hazard.h
     resource/gpu_resource_manager.h
     resource/gpu_readback.h
+    resource/gpu_copy.h
+    resource/gpu_transient_heap.h
     resource/gpu_streaming_manager.h
     resource/gpu_sparse_resource.h
     shader/gpu_shader_compiler.h
@@ -32,6 +35,7 @@ set(GPU_PUBLIC_HEADERS
     pipeline/gpu_pipeline_state.h
     pipeline/gpu_pipeline_cache.h
     pipeline/gpu_cmd_bind.h
+    pipeline/gpu_compute_binding.h
     pipeline/gpu_mesh_pipeline.h
     layout/gpu_shader_object.h
     layout/gpu_parameter_block.h
@@ -74,8 +78,11 @@ set(GPU_SOURCES
     debug/gpu_debug_markers.cpp
     sync/gpu_fence.cpp
     resource/gpu_barrier.cpp
+    resource/gpu_hazard.cpp
     resource/gpu_resource_manager.cpp
     resource/gpu_readback.cpp
+    resource/gpu_copy.cpp
+    resource/gpu_transient_heap.cpp
     resource/gpu_streaming_manager.cpp
     resource/gpu_sparse_resource.cpp
     resource/gpu_frame_context.cpp
@@ -89,6 +96,7 @@ set(GPU_SOURCES
     pipeline/gpu_pipeline_state.cpp
     pipeline/gpu_pipeline_cache.cpp
     pipeline/gpu_cmd_bind.cpp
+    pipeline/gpu_compute_binding.cpp
     pipeline/gpu_mesh_pipeline.cpp
     layout/gpu_parameter_block.cpp
     layout/gpu_shader_object.cpp

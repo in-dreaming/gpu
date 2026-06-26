@@ -18,7 +18,21 @@ typedef enum {
     GPU_QUEUE_TYPE_TRANSFER = 2,
 } GpuQueueType;
 
+typedef enum {
+    GPU_QUEUE_SUPPORT_UNAVAILABLE = 0,
+    GPU_QUEUE_SUPPORT_ALIAS_GRAPHICS = 1,
+    GPU_QUEUE_SUPPORT_DEDICATED = 2,
+} GpuQueueSupport;
+
+typedef struct {
+    GpuQueueType type;
+    GpuQueueSupport support;
+    uint32_t familyIndex;
+    const char* reason;
+} GpuQueueInfo;
+
 GpuResult gpuGetQueue(GpuDevice device, GpuQueueType type, GpuCommandQueue* outQueue);
+GpuResult gpuGetQueueInfo(GpuDevice device, GpuQueueType type, GpuQueueInfo* outInfo);
 
 GpuCommandEncoder gpuBeginCommandEncoder(GpuDevice device, GpuCommandQueue queue);
 GpuCommandBuffer gpuFinishCommandEncoder(GpuCommandEncoder encoder);

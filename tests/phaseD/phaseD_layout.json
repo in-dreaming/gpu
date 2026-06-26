@@ -1,0 +1,80 @@
+{
+  "layoutHash": "1d8b6d5d7892b163",
+  "globalConstantBufferSize": 0,
+  "bindlessSpaceIndex": 1,
+  "entryPoints": [
+    {
+      "name": "vertexMain",
+      "stage": "vertex",
+      "threadGroupSize": [0, 0, 0],
+      "parameterCount": 1
+    },
+    {
+      "name": "fragmentMain",
+      "stage": "fragment",
+      "threadGroupSize": [0, 0, 0],
+      "parameterCount": 1
+    }
+  ],
+  "bindingRanges": [
+    {
+      "kind": "constant_buffer",
+      "set": 0,
+      "binding": 0,
+      "count": 1,
+      "space": 0,
+      "writable": false,
+      "name": "gUniforms",
+      "stageFlags": 4294967295
+    },
+    {
+      "kind": "texture",
+      "set": 0,
+      "binding": 0,
+      "count": 1,
+      "space": 0,
+      "writable": false,
+      "name": "gTexture",
+      "stageFlags": 4294967295
+    },
+    {
+      "kind": "sampler",
+      "set": 0,
+      "binding": 0,
+      "count": 1,
+      "space": 0,
+      "writable": false,
+      "name": "gSampler",
+      "stageFlags": 4294967295
+    },
+    {
+      "kind": "raw_buffer",
+      "set": 0,
+      "binding": 1,
+      "count": 1,
+      "space": 0,
+      "writable": false,
+      "name": "gVertices",
+      "stageFlags": 4294967295
+    },
+    {
+      "kind": "raw_buffer",
+      "set": 0,
+      "binding": 0,
+      "count": 1,
+      "space": 0,
+      "writable": true,
+      "name": "gOutput",
+      "stageFlags": 4294967295
+    }
+  ],
+  "descriptorSets": [
+    {
+      "set": 0,
+      "space": 0,
+      "bindingCount": 5
+    }
+  ],
+  "pushConstants": [
+  ]
+}
