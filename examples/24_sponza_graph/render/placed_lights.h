@@ -4,6 +4,11 @@
 
 struct CameraParams;
 
+enum class PlacedLightKind : uint32_t {
+    Omni = 0,
+    Spot = 1,
+};
+
 struct PlacedPointLightSlot {
     bool active = false;
     PointLightData data = {};
@@ -14,11 +19,9 @@ struct PlacedPointLights {
     static constexpr uint32_t kMaxSlots = 9;
 
     PlacedPointLightSlot slots[kMaxSlots] = {};
+    PlacedLightKind placeKind = PlacedLightKind::Spot;
 
-    void placeAtCamera(uint32_t index, const CameraParams& camera, const Vec3& boundsMin, const Vec3& boundsMax);
     void clear(uint32_t index);
     void clearAll();
     uint32_t requiredLightCount() const;
 };
-
-float placedLightDefaultRadius(const Vec3& lightPos, const Vec3& boundsMin, const Vec3& boundsMax);

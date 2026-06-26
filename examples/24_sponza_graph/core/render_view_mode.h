@@ -32,6 +32,11 @@ inline bool renderViewModeNeedsDirShadows(RenderViewMode m)
            m == RenderViewMode::ShadowUv;
 }
 
+inline bool renderViewModeNeedsSSGI(RenderViewMode m)
+{
+    return m == RenderViewMode::SSGI;
+}
+
 inline const char* renderViewModeName(RenderViewMode m)
 {
     switch (m) {
@@ -116,7 +121,7 @@ inline void renderViewModePrintHelp()
     printf("  diffuse     directional diffuse only\n");
     printf("  specular    directional specular highlight only\n");
     printf("  points      point light contribution only\n");
-    printf("  gi          SSGI / indirect only (needs --features ssgi)\n");
+    printf("  gi          forward indirect GI debug view (compute: --features gbuffer,ssgi)\n");
     printf("  shadow      CSM shadow factor (grayscale)\n");
     printf("  normal      world normals (RGB)\n");
     printf("  depth       view-space depth ramp\n");

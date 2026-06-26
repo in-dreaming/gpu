@@ -116,8 +116,8 @@ DepthTextureCube pointShadowCube6;
 DepthTextureCube pointShadowCube7;
 SamplerState pointShadowDepthSampler;
 StructuredBuffer<PointLightData> pointLights;
-uniform Texture2D<float4>.Handle ssgiTexture;
-uniform SamplerState.Handle ssgiSampler;
+
+static const float kGiIndirectBoost = 1.75;
 
 struct VSOut
 {
@@ -464,10 +464,62 @@ float3 evalPointLights(float3 albedo, float3 n, float3 worldPos)
     return sum;
 }
 
-float3 sampleSSGI(float4 pixelPos)
+float3 evalPointDiffuseGi(float3 albedo, float3 n, float3 worldPos)
 {
-    float2 ssgiUV = pixelPos.xy / float2((float)gFwd.screenWidth, (float)gFwd.screenHeight);
-    return max(ssgiTexture.SampleLevel(ssgiSampler, ssgiUV, 0).rgb, 0.0);
+    float3 sum = float3(0.0, 0.0, 0.0);
+    if (gFwd.features.enablePointLights == 0u)
+        return sum;
+
+    uint count = gFwd.features.pointLightCount;
+    for (uint i = 0; i < count; i++)
+    {
+        PointLightData l = pointLights[i];
+        float3 toLight = l.position - worldPos;
+        float distSq = dot(toLight, toLight);
+        float radiusSq = l.radius * l.radius;
+        if (distSq >= radiusSq)
+            continue;
+
+        float dist = sqrt(distSq);
+        float3 ldir = toLight / max(dist, 1e-3);
+        float atten = 1.0 - dist / l.radius;
+        atten = atten * atten;
+        float spot = pointSpotAttenuation(l, -ldir);
+        float ndlPoint = saturate(dot(n, ldir));
+        sum += albedo * l.color * ndlPoint * atten * spot;
+    }
+    return sum;
+}
+
+float3 estimateIndirectGi(float3 albedo, float3 n, float3 worldPos)
+{
+    float3 directDiffuse = evalPointDiffuseGi(albedo, n, worldPos);
+    float3 bounced = 0;
+    if (gFwd.features.enablePointLights != 0u)
+    {
+        uint count = gFwd.features.pointLightCount;
+        for (uint i = 0; i < count; i++)
+        {
+            PointLightData l = pointLights[i];
+            float3 toLight = l.position - worldPos;
+            float distSq = dot(toLight, toLight);
+            if (distSq >= l.radius * l.radius)
+                continue;
+            float dist = sqrt(distSq);
+            float3 ldir = toLight / max(dist, 1e-3);
+            float facing = saturate(dot(n, ldir));
+            float distFalloff = 1.0 / (1.0 + dist * dist * 0.0006);
+            float spot = pointSpotAttenuation(l, -ldir);
+            bounced += l.color * facing * distFalloff * spot * 0.22;
+        }
+    }
+    float3 roomBounce = albedo * gFwd.lighting.ambientColor * 2.5;
+    return (directDiffuse * 0.10 + bounced + roomBounce) * kGiIndirectBoost;
+}
+
+float3 sampleSSGI(VSOut input, float3 albedo, float3 n)
+{
+    return estimateIndirectGi(albedo, n, input.worldPos);
 }
 
 [shader("fragment")]
@@ -506,7 +558,7 @@ float4 fragmentMain(VSOut input) : SV_Target
 
     float3 giTerm = float3(0.0, 0.0, 0.0);
     if (gFwd.features.enableSSGI != 0u)
-        giTerm = sampleSSGI(input.position) * 0.25;
+        giTerm = sampleSSGI(input, albedo, n) * 0.85;
 
     float3 color = ambientTerm + diffuseTerm + pointTerm + giTerm;
 
@@ -530,7 +582,7 @@ float4 fragmentMain(VSOut input) : SV_Target
     else if (mode == kViewPointLights)
         color = pointTerm;
     else if (mode == kViewSSGI)
-        color = giTerm;
+        color = sampleSSGI(input, albedo, n);
     else if (mode == kViewShadow)
     {
         if (enablePointShadowFlag != 0u)

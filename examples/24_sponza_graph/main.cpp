@@ -36,6 +36,7 @@
 #include "core/render_view_mode.h"
 #include "core/shadow_math.h"
 #include "core/sponza_loader.h"
+#include "core/demo_scene.h"
 #include "core/simple_scene.h"
 #include "render/frame_data.h"
 #include "render/frame_graph.h"
@@ -175,7 +176,7 @@ int main(int argc, char** argv)
     const char* requestedRoot = nullptr;
     uint32_t maxFrames = 0;
     RenderFeatures features = {};
-    renderFeaturesSetBase(features);
+    renderFeaturesSetSponzaDefault(features);
     RenderViewMode viewMode = RenderViewMode::Final;
     const char* featuresCsv = nullptr;
     const char* viewModeStr = nullptr;
@@ -184,8 +185,9 @@ int main(int argc, char** argv)
     bool verifyPointShadow = false;
     bool verifyLightTest = false;
     bool verifyDefault = false;
+    bool verifySsgi = false;
     bool useLightTestScene = false;
-    uint32_t lightTestPoints = 1;
+    uint32_t lightTestPoints = 4;
     char dumpShadowDir[kMaxPathText] = {};
     bool dumpShadow = false;
     bool useSimpleScene = false;
@@ -197,7 +199,7 @@ int main(int argc, char** argv)
             useLightTestScene = true;
             useSimpleScene = true;
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') {
-                lightTestPoints = (uint32_t)std::max(1, std::min(2, atoi(argv[++i])));
+                lightTestPoints = (uint32_t)std::max(1, std::min(4, atoi(argv[++i])));
             }
         } else if (strcmp(argv[i], "--verify-light-test") == 0) {
             verifyLightTest = true;
@@ -207,7 +209,12 @@ int main(int argc, char** argv)
             verifyDefault = true;
             useLightTestScene = true;
             useSimpleScene = true;
-            lightTestPoints = 2;
+            lightTestPoints = 4;
+        } else if (strcmp(argv[i], "--verify-ssgi") == 0) {
+            verifySsgi = true;
+            useLightTestScene = true;
+            useSimpleScene = true;
+            lightTestPoints = 4;
         }
         else if (strcmp(argv[i], "--diag-shadow") == 0) diagShadow = true;
         else if (strcmp(argv[i], "--verify-shadow") == 0) verifyShadow = true;
@@ -253,18 +260,16 @@ int main(int argc, char** argv)
     if (useSimpleScene && !verifyLightTest && !verifyPointShadow) {
         features.pointLights = true;
         features.pointShadows = true;
-        features.pointLightCount = useLightTestScene ? lightTestPoints : 2u;
+        features.pointLightCount = useLightTestScene ? lightTestPoints : 4u;
+        features.dirLight = true;
+        features.dirShadows = true;
         features.fog = false;
-        if (useLightTestScene) {
-            features.dirLight = false;
-            features.dirShadows = false;
-        }
         if (!viewModeStr)
             viewMode = RenderViewMode::PointLights;
     }
     if (useLightTestScene && !verifyLightTest) {
-        features.dirLight = false;
-        features.dirShadows = false;
+        features.dirLight = true;
+        features.dirShadows = true;
         features.fog = false;
         features.pointLights = true;
         features.pointShadows = true;
@@ -272,13 +277,28 @@ int main(int argc, char** argv)
         if (!viewModeStr)
             viewMode = RenderViewMode::Final;
     }
-    if (verifyDefault) {
+    if (verifySsgi) {
         features.dirLight = false;
         features.dirShadows = false;
         features.fog = false;
         features.pointLights = true;
         features.pointShadows = true;
-        features.pointLightCount = 2;
+        features.pointLightCount = 4;
+        useLightTestScene = true;
+        useSimpleScene = true;
+        lightTestPoints = 4;
+        viewMode = RenderViewMode::SSGI;
+        if (maxFrames == 0)
+            maxFrames = 12;
+    }
+    if (verifyDefault) {
+        features.dirLight = true;
+        features.dirShadows = true;
+        features.fog = false;
+        features.pointLights = true;
+        features.pointShadows = true;
+        features.pointLightCount = 4;
+        lightTestPoints = 4;
         if (!viewModeStr)
             viewMode = RenderViewMode::Final;
         if (maxFrames == 0)
@@ -312,6 +332,13 @@ int main(int argc, char** argv)
         features.dirShadows = true;
         printf("Auto-enabled dir shadows for --view-mode %s\n", renderViewModeName(viewMode));
     }
+    if (renderViewModeNeedsSSGI(viewMode)) {
+        // GI debug view is implemented in forward.slang (estimateIndirectGi); it does not
+        // require the gbuffer/ssgi render graph passes. Auto-enabling them here crashes on
+        // large scenes (Sponza) when the SSGI compute pass exhausts transient descriptors.
+        if (!features.gbuffer || !features.ssgi)
+            printf("Note: --view-mode gi shows forward indirect GI; use --features gbuffer,ssgi for compute SSGI.\n");
+    }
 
     char rootBuf[kMaxPathText];
     const char* root = nullptr;
@@ -320,9 +347,10 @@ int main(int argc, char** argv)
         if (!root) {
             printf("Usage: 24_sponza_graph [--simple] [--features <csv>] [--view-mode <name>] [path-to-Sponza]\n");
         printf("  --simple        open room + scattered props (no --light-test)\n");
-            printf("  --light-test [1|2]  same open room + center cube cluster for point lights\n");
+            printf("  --light-test [1|2|4]  same open room + center cube cluster for point lights\n");
             printf("  --verify-light-test   auto-test 1/2 point lights +/- shadows\n");
-            printf("  --verify-default      auto-test --simple --light-test 2 startup path\n");
+            printf("  --verify-default      auto-test --simple --light-test 4 startup path\n");
+            printf("  --verify-ssgi         auto-test gbuffer+ssgi on light-test scene\n");
             printf("  --verify-point-shadow  auto-test point-light cube shadows (simple scene)\n");
             renderFeaturesPrintHelp();
             renderViewModePrintHelp();
@@ -330,26 +358,22 @@ int main(int argc, char** argv)
         }
     }
 
-    SponzaScene scene;
+    DemoScene demoScene;
     if (useLightTestScene) {
-        buildSimpleLightTestScene(scene);
-        printf("Light-test scene (open room + cube cluster): %zu verts, %zu indices, %zu draws\n",
-               scene.vertices.size(), scene.indices.size(), scene.draws.size());
+        demoScene.buildLightTest();
+        demoScene.lightTestCeilingCount = lightTestPoints;
     } else if (useSimpleScene) {
-        buildSimpleShadowScene(scene);
-        printf("Simple scene (open room + scattered props): %zu verts, %zu indices, %zu draws\n",
-               scene.vertices.size(), scene.indices.size(), scene.draws.size());
+        demoScene.buildSimpleRoom();
     } else {
-        char objPath[kMaxPathText], mtlPath[kMaxPathText];
-        pathJoin(objPath, sizeof(objPath), root, "sponza.obj");
-        pathJoin(mtlPath, sizeof(mtlPath), root, "sponza.mtl");
-        if (!parseMtl(mtlPath, scene) || !parseObj(objPath, scene)) {
+        char rootBufLoad[kMaxPathText];
+        const char* rootLoad = resolveSponzaRoot(requestedRoot, argv[0], rootBufLoad, sizeof(rootBufLoad));
+        if (!rootLoad || !demoScene.loadSponza(rootLoad)) {
             printf("Parse failed\n");
             return 1;
         }
-        printf("Sponza: %zu verts, %zu indices, %zu materials, %zu draws\n",
-               scene.vertices.size(), scene.indices.size(), scene.materials.size(), scene.draws.size());
     }
+    demoScene.printStartupInfo();
+    SponzaScene& scene = demoScene.geometry;
 
     gpuPlatformInit();
 
@@ -383,7 +407,7 @@ int main(int argc, char** argv)
     gpuSurfaceConfigure(surface, 1280, 720, surfaceFormat, true);
 
     MaterialTextures matTex;
-    if (useSimpleScene) {
+    if (demoScene.usesSimpleMaterials()) {
         if (!createSimpleMaterialTextures(device, matTex)) {
             printf("Simple textures failed\n");
             return 1;
@@ -441,51 +465,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (useSimpleScene || useLightTestScene) {
-        const SimpleRoomLayout room = getSimpleRoomLayout();
-        printf("Room shell: %.0fx%.0fx%.0fm (scale=%.0f), bounds (%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)\n",
-               room.halfX * 2.0f, room.halfY * 2.0f, room.halfZ * 2.0f, kSimpleSceneWorldScale, scene.boundsMin.x,
-               scene.boundsMin.y, scene.boundsMin.z, scene.boundsMax.x, scene.boundsMax.y, scene.boundsMax.z);
-        if (useLightTestScene && useSimpleScene)
-            printf("  --light-test: center cube cluster. Use --simple only for random props inside the room.\n");
-    }
-
-    Vec3 center = {(scene.boundsMin.x + scene.boundsMax.x) * 0.5f,
-                   (scene.boundsMin.y + scene.boundsMax.y) * 0.5f,
-                   (scene.boundsMin.z + scene.boundsMax.z) * 0.5f};
-
     std::vector<PointLightData> initLights(kMaxPointLights);
-    for (uint32_t i = 0; i < kMaxPointLights; i++) {
-        float angle = (float)i / (float)kMaxPointLights * 2.0f * 3.14159265f;
-        float radius = 150.0f + (float)(i % 6) * 100.0f;
-        float height = 50.0f + (float)(i % 10) * 40.0f;
-        initLights[i].position[0] = center.x + cosf(angle) * radius;
-        initLights[i].position[1] = center.y + height;
-        initLights[i].position[2] = center.z + sinf(angle) * radius;
-        initLights[i].radius = 10.0f + (float)(i % 4) * 20.0f;
-        float hue = (float)i / (float)kMaxPointLights;
-        initLights[i].color[0] = 0.5f + 0.5f * sinf(hue * 6.28318f);
-        initLights[i].color[1] = 0.5f + 0.5f * sinf((hue + 0.33f) * 6.28318f);
-        initLights[i].color[2] = 0.5f + 0.5f * sinf((hue + 0.67f) * 6.28318f);
-        initLights[i].shadowMapIndex = -1;
-    }
+    demoScene.fillBuiltinPointLights(initLights.data(), kMaxPointLights, 0.0f);
     gpuUploadToBuffer(device, res.lightBuffer, initLights.data(), kMaxPointLights * sizeof(PointLightData), 0);
 
     FlyCamera cam;
-    SimpleSceneLighting simpleLighting = {};
+    DemoSceneLightingPreset lightingPreset = {};
     DirLightController dirLightCtrl = {};
-    if (useLightTestScene) {
-        setupSimpleLightTestCamera(cam);
-        setupSimpleLightTestLighting(simpleLighting);
-    } else if (useSimpleScene) {
-        setupSimpleSceneCamera(cam);
-        setupSimpleSceneLighting(simpleLighting);
-    } else {
-        cam.position = {321.0f, 733.0f, -40.0f};
-        cam.yaw = -1.62f;
-        cam.pitch = 0.0f;
-    }
-    if (verifyShadow && !useSimpleScene) {
+    demoScene.setupCamera(cam);
+    demoScene.setupLighting(lightingPreset);
+    demoScene.setupDirLight(dirLightCtrl);
+    if (verifyShadow && !demoScene.isCompactRoom()) {
         cam.position = {321.0f, 733.0f, -40.0f};
         cam.yaw = -1.62f;
         cam.pitch = 0.0f;
@@ -494,35 +484,20 @@ int main(int argc, char** argv)
     FrameData fd = {};
     fd.device = device;
     fd.scene = &scene;
+    fd.demoScene = &demoScene;
     fd.pipelines = &pipelines;
     fd.resources = &res;
     fd.materials = &matTex;
     fd.features = features;
     fd.viewMode = viewMode;
-    fd.lightTestMode = useLightTestScene;
-    fd.simpleSceneMode = useSimpleScene && !useLightTestScene;
     fd.lightTestPointCount = lightTestPoints;
+    demoScene.lightTestCeilingCount = lightTestPoints;
     fd.diagShadow = diagShadow || verifyShadow || verifyPointShadow;
-    if (useSimpleScene || useLightTestScene) {
-        memcpy(fd.dirLightDir, simpleLighting.dirLightDir, sizeof(fd.dirLightDir));
-        memcpy(fd.dirLightColor, simpleLighting.dirLightColor, sizeof(fd.dirLightColor));
-        memcpy(fd.ambientColor, simpleLighting.ambientColor, sizeof(fd.ambientColor));
-        fd.dirLightIntensity = simpleLighting.dirLightIntensity;
-    } else {
-        fd.dirLightDir[0] = 0.55f;
-        fd.dirLightDir[1] = -0.78f;
-        fd.dirLightDir[2] = 0.28f;
-        fd.dirLightColor[0] = 1.0f;
-        fd.dirLightColor[1] = 0.94f;
-        fd.dirLightColor[2] = 0.82f;
-        fd.ambientColor[0] = 0.22f;
-        fd.ambientColor[1] = 0.24f;
-        fd.ambientColor[2] = 0.28f;
-        fd.dirLightIntensity = 2.5f;
-    }
-    if (useLightTestScene)
-        setupSimpleLightTestDirLight(dirLightCtrl);
-    else
+    memcpy(fd.dirLightDir, lightingPreset.dirLightDir, sizeof(fd.dirLightDir));
+    memcpy(fd.dirLightColor, lightingPreset.dirLightColor, sizeof(fd.dirLightColor));
+    memcpy(fd.ambientColor, lightingPreset.ambientColor, sizeof(fd.ambientColor));
+    fd.dirLightIntensity = lightingPreset.dirLightIntensity;
+    if (!demoScene.isLightTest())
         dirLightSetFromTravelDir(dirLightCtrl, fd.dirLightDir[0], fd.dirLightDir[1], fd.dirLightDir[2]);
     fd.surfaceWidth = 1280;
     fd.surfaceHeight = 720;
@@ -551,6 +526,7 @@ int main(int argc, char** argv)
     bool verifyPointOk = true;
     bool verifyLightTestOk = true;
     bool verifyDefaultOk = true;
+    bool verifySsgiOk = true;
     struct LightTestCase {
         const char* name;
         uint32_t pointCount;
@@ -576,22 +552,22 @@ int main(int argc, char** argv)
     auto lastPrint = last;
 
     printf("WASD move, Q/E up/down, right-drag look, IJKL look, U/O light yaw, Y/H light pitch, [ ] view, Esc quit.\n");
-    printf("  1-9 place spotlight at camera facing view (same key updates), 0 clear placed lights.\n");
-    if (useSimpleScene || useLightTestScene) {
-        CameraParams look = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight, simpleLighting.cameraFov,
-                                             simpleLighting.cameraNear, simpleLighting.cameraFar);
+    printf("  1-9 place light at camera (T toggles omni/spot), 0 clear placed lights.\n");
+    if (demoScene.isCompactRoom()) {
+        CameraParams look = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight, lightingPreset.cameraFov,
+                                             lightingPreset.cameraNear, lightingPreset.cameraFar);
         printf("Simple scene camera: pos=(%.1f,%.1f,%.1f) yaw=%.2f pitch=%.2f look=(%.2f,%.2f,%.2f)\n",
                cam.position.x, cam.position.y, cam.position.z, cam.yaw, cam.pitch, look.forward[0], look.forward[1],
                look.forward[2]);
     } else
         printf("Default view: pos=(321,733,-40) yaw=-1.62 frame=%u\n", kDefaultStartFrame);
-    if (useLightTestScene) {
+    if (demoScene.isLightTest()) {
         const SimpleLightTestLayout layout = getSimpleLightTestLayout();
         printf("Light-test layout: center=(%.2f,%.2f,%.2f) height=%.2f radius=%.2f points=%u shadows=%u\n",
                layout.clusterCenter.x, layout.clusterCenter.y, layout.clusterCenter.z, layout.lightHeight,
                layout.lightRadius, lightTestPoints,
                features.pointShadows ? std::min(lightTestPoints, kMaxPointShadowSlots) : 0u);
-        printf("  Keys: [ ] view mode, ,/. switch 1/2 ceiling lights, 0 reset lights+camera, R reset camera\n");
+        printf("  Keys: [ ] view mode, ,/. cycle 1/2/4 ceiling lights, T omni/spot place mode, 0 reset lights+camera, R reset camera\n");
         printf("  Tip: default view is 'final' (lit scene). Press [ ] for debug views incl. 'points'. Press 0 to reset.\n");
         printf("  Default dir-light: lightYaw=%.2f lightPitch=%.2f\n", dirLightCtrl.yaw, dirLightCtrl.pitch);
     }
@@ -612,8 +588,14 @@ int main(int argc, char** argv)
                 fd.surfaceHeight = std::max(ev.resize.height, 1u);
                 gpuSurfaceConfigure(surface, fd.surfaceWidth, fd.surfaceHeight, surfaceFormat, true);
                 recreateGBuffer(res, fd.surfaceWidth, fd.surfaceHeight);
+                if (features.ssgi)
+                    recreateSsgiOutput(res, fd.surfaceWidth, fd.surfaceHeight);
                 if (!refreshGBufferBindlessHandles(res)) {
                     printf("Failed to refresh bindless G-buffer handles after resize\n");
+                    quit = true;
+                }
+                if (features.ssgi && !refreshSsgiBindlessHandles(res)) {
+                    printf("Failed to refresh bindless SSGI handles after resize\n");
                     quit = true;
                 }
             }
@@ -631,6 +613,10 @@ int main(int argc, char** argv)
                         fd.features = features;
                         printf("Auto-enabled dir shadows for debug view '%s'\n", renderViewModeName(fd.viewMode));
                     }
+                    if (renderViewModeNeedsSSGI(fd.viewMode) && !features.gbuffer && !features.ssgi) {
+                        printf("Note: view '%s' uses forward indirect GI; --features gbuffer,ssgi enables compute pass.\n",
+                               renderViewModeName(fd.viewMode));
+                    }
                     renderViewModePrint(fd.viewMode);
                 }
                 if (dn && k == '[') {
@@ -641,31 +627,55 @@ int main(int argc, char** argv)
                         fd.features = features;
                         printf("Auto-enabled dir shadows for debug view '%s'\n", renderViewModeName(fd.viewMode));
                     }
+                    if (renderViewModeNeedsSSGI(fd.viewMode) && !features.gbuffer && !features.ssgi) {
+                        printf("Note: view '%s' uses forward indirect GI; --features gbuffer,ssgi enables compute pass.\n",
+                               renderViewModeName(fd.viewMode));
+                    }
                     renderViewModePrint(fd.viewMode);
                 }
                 if (dn && k == '0' && !verifyLightTest) {
                     fd.placedPointLights.clearAll();
-                    if (useLightTestScene) {
+                    if (demoScene.isLightTest()) {
                         features.pointLightCount = lightTestPoints;
                         fd.features = features;
-                        setupSimpleLightTestCamera(cam);
-                        setupSimpleLightTestDirLight(dirLightCtrl);
+                        demoScene.setupCamera(cam);
+                        demoScene.setupDirLight(dirLightCtrl);
                         printf("Cleared placed lights; restored %u ceiling light(s) and reset camera.\n",
                                lightTestPoints);
                     } else {
                         printf("Cleared all camera-placed point lights.\n");
                     }
                 }
-                if (dn && (k == 'r' || k == 'R') && useLightTestScene && !verifyLightTest) {
-                    setupSimpleLightTestCamera(cam);
-                    setupSimpleLightTestDirLight(dirLightCtrl);
+                if (dn && (k == 'r' || k == 'R') && demoScene.isLightTest() && !verifyLightTest) {
+                    demoScene.setupCamera(cam);
+                    demoScene.setupDirLight(dirLightCtrl);
                     printf("Reset camera to light-test default.\n");
                 }
                 if (dn && !verifyLightTest && k >= '1' && k <= '9') {
                     pendingPlaceLightIndex = (int32_t)(k - '1');
                 }
-                if (dn && useLightTestScene && !verifyLightTest && (k == ',' || k == '.')) {
-                    lightTestPoints = (k == ',') ? 1u : 2u;
+                if (dn && !verifyLightTest && (k == 't' || k == 'T')) {
+                    fd.placedPointLights.placeKind = (fd.placedPointLights.placeKind == PlacedLightKind::Spot)
+                                                         ? PlacedLightKind::Omni
+                                                         : PlacedLightKind::Spot;
+                    printf("Place mode: %s point light\n",
+                           fd.placedPointLights.placeKind == PlacedLightKind::Omni ? "omni" : "spot");
+                }
+                if (dn && demoScene.isLightTest() && !verifyLightTest && (k == ',' || k == '.')) {
+                    static const uint32_t kLightTestCounts[] = {1u, 2u, 4u};
+                    uint32_t idx = 0;
+                    for (uint32_t i = 0; i < 3; i++) {
+                        if (lightTestPoints == kLightTestCounts[i]) {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    if (k == ',')
+                        idx = (idx + 2u) % 3u;
+                    else
+                        idx = (idx + 1u) % 3u;
+                    lightTestPoints = kLightTestCounts[idx];
+                    demoScene.lightTestCeilingCount = lightTestPoints;
                     fd.lightTestPointCount = lightTestPoints;
                     features.pointLightCount = lightTestPoints;
                     fd.features = features;
@@ -678,11 +688,7 @@ int main(int argc, char** argv)
             if (ev.type == GPU_PLATFORM_EVENT_MOUSE_MOVE && rmd) rotateCameraByMouse(cam, ev.mouse.dx, ev.mouse.dy);
         }
 
-        if (useSimpleScene || useLightTestScene) {
-            updateCamera(cam, keys, dt, simpleLighting.cameraMoveSpeed, simpleLighting.cameraLookSpeed);
-        } else {
-            updateCamera(cam, keys, dt);
-        }
+        updateCamera(cam, keys, dt, lightingPreset.cameraMoveSpeed, lightingPreset.cameraLookSpeed);
         updateDirLightController(dirLightCtrl, keys, dt);
         dirLightWriteTravelDir(dirLightCtrl, fd.dirLightDir);
 
@@ -703,6 +709,7 @@ int main(int argc, char** argv)
             features.dirShadows = false;
             features.fog = false;
             fd.lightTestPointCount = tc.pointCount;
+            demoScene.lightTestCeilingCount = tc.pointCount;
             fd.features = features;
             if (frameInCase == 0) {
                 if (tc.pointShadows && tc.pointCount == 1)
@@ -713,26 +720,24 @@ int main(int argc, char** argv)
             }
         }
 
-        if (useSimpleScene || useLightTestScene) {
-            fd.cameraParams = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight, simpleLighting.cameraFov,
-                                               simpleLighting.cameraNear, simpleLighting.cameraFar);
-        } else {
-            fd.cameraParams = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight);
-        }
+        fd.cameraParams = makeCameraParams(cam, (float)fd.surfaceWidth / fd.surfaceHeight, lightingPreset.cameraFov,
+                                           lightingPreset.cameraNear, lightingPreset.cameraFar);
 
         if (pendingPlaceLightIndex >= 0) {
             const uint32_t lightIndex = (uint32_t)pendingPlaceLightIndex;
             if (lightIndex < PlacedPointLights::kMaxSlots) {
-                fd.placedPointLights.placeAtCamera(lightIndex, fd.cameraParams, scene.boundsMin, scene.boundsMax);
+                demoScene.placeLightAtCamera(fd.placedPointLights, lightIndex, fd.cameraParams,
+                                             fd.placedPointLights.placeKind);
                 features.pointLights = true;
-                const uint32_t lightBase = useLightTestScene ? lightTestPoints : 0u;
-                features.pointLightCount = std::max(
-                    {features.pointLightCount, lightBase + lightIndex + 1,
-                     lightBase + fd.placedPointLights.requiredLightCount()});
+                features.pointShadows = true;
+                features.pointLightCount =
+                    demoScene.resolvePointLightUploadCount(features.pointLightCount, fd.placedPointLights);
                 fd.features = features;
-                if (useLightTestScene)
+                if (demoScene.isLightTest()) {
+                    const uint32_t lightBase = demoScene.placedLightBufferOffset();
                     printf("  (light-test: ceiling lights 1-%u kept; key %u is extra light %u)\n", lightTestPoints,
                            lightIndex + 1, lightBase + lightIndex + 1);
+                }
             }
             pendingPlaceLightIndex = -1;
         }
@@ -821,6 +826,8 @@ int main(int argc, char** argv)
         } else {
             if (gpuSurfaceAcquireNextImage(surface, &bb) != GPU_SUCCESS) continue;
 
+            fd.features = features;
+
             FrameGraphContext graphCtx = {};
             graphCtx.device = device;
             graphCtx.backbuffer = bb;
@@ -859,6 +866,24 @@ int main(int argc, char** argv)
             } else {
                 printf("[verify-light] FAIL %s: readback failed\n", tc.name);
                 verifyLightTestOk = false;
+            }
+        }
+
+        if (verifySsgi && loopFrame == 9) {
+            device->graphicsQueue->waitOnHost();
+            ColorBufferStats colorStats = {};
+            if (shadowDiagReadbackSurface(device, bb, fd.surfaceWidth, fd.surfaceHeight, colorStats)) {
+                shadowDiagPrintColorStats(colorStats, "ssgi_gi");
+                char failMsg[256] = {};
+                if (!shadowDiagCheckSsgiView(colorStats, failMsg, sizeof(failMsg))) {
+                    printf("[verify-ssgi] FAIL ssgi_gi: %s\n", failMsg);
+                    verifySsgiOk = false;
+                } else {
+                    printf("[verify-ssgi] PASS ssgi_gi\n");
+                }
+            } else {
+                printf("[verify-ssgi] FAIL ssgi_gi: readback failed\n");
+                verifySsgiOk = false;
             }
         }
 
@@ -926,7 +951,7 @@ int main(int argc, char** argv)
                     verifyBaselineDirect = colorStats;
                 } else if (loopFrame == 4) {
                     float delta = verifyBaselineDirect.meanLuma - colorStats.meanLuma;
-                    float minDelta = useSimpleScene ? 0.002f : 0.005f;
+                    float minDelta = demoScene.isCompactRoom() ? 0.002f : 0.005f;
                     printf("[verify] direct A/B mean luma delta (no-shadow - shadow) = %.4f\n", delta);
                     if (delta < minDelta) {
                         printf("[verify] FAIL direct: insufficient shadow darkening (delta=%.4f, need>=%.4f)\n", delta,
@@ -938,7 +963,7 @@ int main(int argc, char** argv)
                 }
                 if (loopFrame > 0) {
                     char failMsg[256] = {};
-                    auto checkView = useSimpleScene ? shadowDiagCheckViewModeSimple : shadowDiagCheckViewMode;
+                    auto checkView = demoScene.isCompactRoom() ? shadowDiagCheckViewModeSimple : shadowDiagCheckViewMode;
                     if (!checkView(colorStats, fd.viewMode, failMsg, sizeof(failMsg))) {
                         if (fd.viewMode != RenderViewMode::Direct) {
                             printf("[verify] FAIL %s: %s\n", modeName, failMsg);
@@ -986,6 +1011,11 @@ int main(int argc, char** argv)
                 shadowDiagPrintStats(stats, ci);
         }
         printf("=== End shadow diagnostics ===\n");
+    }
+
+    if (verifySsgi) {
+        printf("=== SSGI verify: %s ===\n", verifySsgiOk ? "PASS" : "FAIL");
+        if (!verifySsgiOk) return 1;
     }
 
     if (verifyDefault) {

@@ -15,7 +15,10 @@ option(GPU_ENABLE_WEBGPU "Enable WebGPU backend" OFF)
 option(GPU_BUILD_EXAMPLES "Build examples" ON)
 option(GPU_BUILD_TESTS "Build tests" ON)
 option(GPU_INSTALL "Enable install rules" ON)
-set(GPU_SPONZA_ROOT "" CACHE PATH "Optional path to jimmiebergmann/Sponza assets for example 21")
+set(GPU_SPONZA_ROOT "" CACHE PATH "Path to Sponza assets (default: modules/3rd/Sponza submodule)")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/GpuThirdParty.cmake")
+gpu_resolve_sponza_root()
 
 include(CTest)
 

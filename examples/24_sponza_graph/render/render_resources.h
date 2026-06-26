@@ -87,5 +87,7 @@ bool validateBindlessBindings(RenderResources& r);
 bool refreshSceneDepthBindlessHandle(RenderResources& r);
 bool refreshGBufferBindlessHandles(RenderResources& r);
 void recreateGBuffer(RenderResources& r, uint32_t w, uint32_t h);
+void recreateSsgiOutput(RenderResources& r, uint32_t w, uint32_t h);
 void recreateDepth(RenderResources& r, uint32_t w, uint32_t h);
+bool refreshSsgiBindlessHandles(RenderResources& r);
 void destroyRenderResources(RenderResources& r);

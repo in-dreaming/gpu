@@ -329,9 +329,9 @@ SimpleLightTestLayout getSimpleLightTestLayout()
     SimpleLightTestLayout layout = {};
     layout.clusterCenter = {0.0f, W(0.85f), 0.0f};
     layout.clusterHalfExtent = W(1.3f);
-    layout.lightHeight = room.halfY * 2.0f - W(0.55f);
-    layout.lightRadius = room.halfY * 2.25f;
-    layout.lightPairSeparation = W(1.8f);
+    layout.lightHeight = room.halfY * 2.0f - W(1.35f);
+    layout.lightRadius = room.halfY * 0.65f;
+    layout.lightPairSeparation = W(1.1f);
     return layout;
 }
 
@@ -375,16 +375,16 @@ void setupSimpleLightTestDirLight(DirLightController& ctrl)
 void setupSimpleLightTestLighting(SimpleSceneLighting& out)
 {
     const SimpleRoomLayout room = getSimpleRoomLayout();
-    out.dirLightDir[0] = 0.0f;
-    out.dirLightDir[1] = -1.0f;
-    out.dirLightDir[2] = 0.0f;
-    out.dirLightIntensity = 0.0f;
-    out.dirLightColor[0] = 0.0f;
-    out.dirLightColor[1] = 0.0f;
-    out.dirLightColor[2] = 0.0f;
-    out.ambientColor[0] = 0.07f;
-    out.ambientColor[1] = 0.07f;
-    out.ambientColor[2] = 0.075f;
+    out.dirLightDir[0] = 0.35f;
+    out.dirLightDir[1] = -0.90f;
+    out.dirLightDir[2] = 0.25f;
+    out.dirLightIntensity = 1.0f;
+    out.dirLightColor[0] = 1.0f;
+    out.dirLightColor[1] = 0.96f;
+    out.dirLightColor[2] = 0.88f;
+    out.ambientColor[0] = 0.03f;
+    out.ambientColor[1] = 0.03f;
+    out.ambientColor[2] = 0.035f;
     out.cameraNear = W(0.35f);
     out.cameraFar = room.halfZ * 4.5f + W(3.0f);
     out.cameraFov = 50.0f;

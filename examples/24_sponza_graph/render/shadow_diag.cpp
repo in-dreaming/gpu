@@ -246,6 +246,8 @@ static float pixelLuma(uint32_t bgra)
     return 0.2126f * r + 0.7152f * g + 0.0722f * b;
 }
 
+static void computeColorStats(const uint8_t* bytes, uint32_t rowPitch, uint32_t w, uint32_t h, ColorBufferStats& stats);
+
 bool shadowDiagReadbackSurface(GpuDevice device, GpuSurfaceTexture surf, uint32_t w, uint32_t h, ColorBufferStats& stats)
 {
     stats = {};
@@ -302,27 +304,12 @@ bool shadowDiagReadbackSurface(GpuDevice device, GpuSurfaceTexture surf, uint32_
     }
 
     const uint8_t* bytes = static_cast<const uint8_t*>(mapped);
-    double sum = 0.0;
-    stats.minLuma = 1e9f;
-    stats.maxLuma = -1e9f;
-    const uint32_t total = w * h;
-    for (uint32_t y = 0; y < h; y++) {
-        const uint32_t* row = reinterpret_cast<const uint32_t*>(bytes + (size_t)y * rowPitch);
-        for (uint32_t x = 0; x < w; x++) {
-            float l = pixelLuma(row[x]);
-            stats.minLuma = std::min(stats.minLuma, l);
-            stats.maxLuma = std::max(stats.maxLuma, l);
-            sum += l;
-            if (l > 0.95f) stats.pixelsNearWhite++;
-            else if (l < 0.05f) stats.pixelsNearBlack++;
-            else stats.pixelsMid++;
-        }
-    }
-    stats.meanLuma = total ? (float)(sum / total) : 0.0f;
+    std::vector<uint8_t> copy((size_t)bufSize);
+    memcpy(copy.data(), bytes, (size_t)bufSize);
+    computeColorStats(copy.data(), rowPitch, w, h, stats);
 
     gpuUnmapReadbackBuffer(device, readback);
     gpuDestroyBuffer(device, readback);
-    stats.readbackOk = true;
     return true;
 }
 
@@ -331,6 +318,11 @@ void shadowDiagPrintColorStats(const ColorBufferStats& stats, const char* label)
     printf("[verify] %s readback %s (%ux%u)\n", label, stats.readbackOk ? "OK" : "FAILED", stats.width, stats.height);
     if (!stats.readbackOk) return;
     printf("[verify]   luma min=%.4f max=%.4f mean=%.4f\n", stats.minLuma, stats.maxLuma, stats.meanLuma);
+    if (stats.centerPixelCount > 0) {
+        printf("[verify]   center luma min=%.4f max=%.4f mean=%.4f nearBlack=%u/%u\n",
+               stats.centerMinLuma, stats.centerMaxLuma, stats.centerMeanLuma, stats.centerPixelsNearBlack,
+               stats.centerPixelCount);
+    }
     printf("[verify]   nearWhite(>0.95)=%u nearBlack(<0.05)=%u mid=%u total=%u\n",
            stats.pixelsNearWhite, stats.pixelsNearBlack, stats.pixelsMid, stats.width * stats.height);
 }
@@ -615,6 +607,53 @@ bool shadowDiagCheckDefaultLightTestFinal(const ColorBufferStats& stats, char* f
     return true;
 }
 
+bool shadowDiagCheckSsgiView(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize)
+{
+    if (failMsg && failMsgSize > 0) failMsg[0] = 0;
+    if (!stats.readbackOk) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "readback failed");
+        return false;
+    }
+    if (stats.centerPixelCount == 0) {
+        if (failMsg && failMsgSize > 0) snprintf(failMsg, failMsgSize, "center region empty");
+        return false;
+    }
+    const float span = stats.maxLuma - stats.minLuma;
+    if (stats.maxLuma < 0.03f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "SSGI view too dark (max=%.3f)", stats.maxLuma);
+        return false;
+    }
+    if (span < 0.02f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "SSGI view span %.3f too small", span);
+        return false;
+    }
+    if (stats.centerMaxLuma < 0.08f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "center geometry too dark (centerMax=%.3f)", stats.centerMaxLuma);
+        return false;
+    }
+    if (stats.centerMeanLuma < 0.04f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "center mean luma %.3f too low", stats.centerMeanLuma);
+        return false;
+    }
+    const float centerSpan = stats.centerMaxLuma - stats.centerMinLuma;
+    if (centerSpan < 0.06f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "center GI too flat (span=%.3f)", centerSpan);
+        return false;
+    }
+    const float centerNearBlackRatio = (float)stats.centerPixelsNearBlack / (float)stats.centerPixelCount;
+    if (centerNearBlackRatio > 0.70f) {
+        if (failMsg && failMsgSize > 0)
+            snprintf(failMsg, failMsgSize, "center %.0f%% near-black (expected geometry lit)", centerNearBlackRatio * 100.0f);
+        return false;
+    }
+    return true;
+}
+
 bool shadowDiagCheckPointShadowDepth(GpuDevice device, GpuTextureHandle cubeTex, char* failMsg, size_t failMsgSize)
 {
     if (failMsg && failMsgSize > 0) failMsg[0] = 0;
@@ -710,6 +749,13 @@ static void computeColorStats(const uint8_t* bytes, uint32_t rowPitch, uint32_t 
     double sum = 0.0;
     stats.minLuma = 1e9f;
     stats.maxLuma = -1e9f;
+    stats.centerMinLuma = 1e9f;
+    stats.centerMaxLuma = -1e9f;
+    const uint32_t x0 = w / 4u;
+    const uint32_t x1 = w - x0;
+    const uint32_t y0 = h / 4u;
+    const uint32_t y1 = h - y0;
+    double centerSum = 0.0;
     const uint32_t total = w * h;
     for (uint32_t y = 0; y < h; y++) {
         const uint32_t* row = reinterpret_cast<const uint32_t*>(bytes + (size_t)y * rowPitch);
@@ -721,9 +767,18 @@ static void computeColorStats(const uint8_t* bytes, uint32_t rowPitch, uint32_t 
             if (l > 0.95f) stats.pixelsNearWhite++;
             else if (l < 0.05f) stats.pixelsNearBlack++;
             else stats.pixelsMid++;
+
+            if (x >= x0 && x < x1 && y >= y0 && y < y1) {
+                stats.centerMinLuma = std::min(stats.centerMinLuma, l);
+                stats.centerMaxLuma = std::max(stats.centerMaxLuma, l);
+                centerSum += l;
+                stats.centerPixelCount++;
+                if (l < 0.05f) stats.centerPixelsNearBlack++;
+            }
         }
     }
     stats.meanLuma = total ? (float)(sum / total) : 0.0f;
+    stats.centerMeanLuma = stats.centerPixelCount ? (float)(centerSum / stats.centerPixelCount) : 0.0f;
     stats.readbackOk = true;
 }
 

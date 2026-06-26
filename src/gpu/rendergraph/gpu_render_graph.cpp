@@ -565,96 +565,99 @@ static void emitBarriers(GpuGraph graph, GpuCommandEncoder encoder, const std::v
     }
 }
 
+static void executeGraphPass(GpuGraph graph, GpuCommandEncoder encoder, uint32_t pi)
+{
+    auto& pass = *graph->passes[pi];
+    GpuGraphPassContext ctx = {};
+    ctx.encoder = encoder;
+
+    if (pass.kind == GPU_GRAPH_PASS_RENDER) {
+        GpuRenderPassColorAttachment colorAtts[8];
+        for (uint32_t ci = 0; ci < (uint32_t)pass.colorAttachments.size() && ci < 8; ci++) {
+            auto& src = pass.colorAttachments[ci];
+            auto& dst = colorAtts[ci];
+            uint32_t ri = src.resource - 1;
+            auto& res = graph->resources[ri];
+
+            memset(&dst, 0, sizeof(dst));
+            if (res.isSurfaceTexture && res.importedSurfaceTexture) {
+                dst.attachment = res.importedSurfaceTexture;
+            } else if (res.realizedView.index != 0) {
+                dst.viewHandle = res.realizedView;
+            } else {
+                dst.textureHandle = res.imported ? res.importedTexture : res.realizedTexture;
+            }
+            dst.loadOp = src.loadOp;
+            dst.storeOp = src.storeOp;
+            memcpy(dst.clearValue, src.clearColor, sizeof(float) * 4);
+        }
+
+        GpuRenderPassDepthAttachment depthAtt;
+        if (pass.hasDepth) {
+            uint32_t ri = pass.depthAttachment.resource - 1;
+            if (ri < graph->resources.size()) {
+                auto& res = graph->resources[ri];
+                memset(&depthAtt, 0, sizeof(depthAtt));
+                if (gpuHandleIsValid(pass.depthAttachment.depthViewOverride)) {
+                    depthAtt.viewHandle = pass.depthAttachment.depthViewOverride;
+                } else {
+                    if (res.depthView.index == 0) {
+                        GpuTextureHandle texH = res.imported ? res.importedTexture : res.realizedTexture;
+                        gpuCreateTextureView(graph->device, texH, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &res.depthView);
+                    }
+                    depthAtt.viewHandle = res.depthView;
+                }
+                depthAtt.depthLoadOp = pass.depthAttachment.loadOp;
+                depthAtt.depthStoreOp = pass.depthAttachment.storeOp;
+                depthAtt.clearDepth = pass.depthAttachment.clearDepth;
+                depthAtt.stencilLoadOp = GPU_LOAD_OP_DONT_CARE;
+                depthAtt.stencilStoreOp = GPU_STORE_OP_DONT_CARE;
+                depthAtt.clearStencil = pass.depthAttachment.clearStencil;
+            }
+        }
+
+        GpuRenderPassDesc passDesc = {};
+        passDesc.colorAttachmentCount = (uint32_t)pass.colorAttachments.size();
+        passDesc.colorAttachments = colorAtts;
+        passDesc.depthAttachment = pass.hasDepth ? &depthAtt : nullptr;
+
+        GpuRenderPassEncoder rpEnc = gpuCmdBeginRenderPass(encoder, &passDesc);
+        if (rpEnc) {
+            ctx.renderPass = rpEnc;
+            if (pass.callback) pass.callback(&ctx, pass.userData);
+            gpuCmdEndRenderPass(rpEnc);
+        }
+    } else if (pass.kind == GPU_GRAPH_PASS_COMPUTE) {
+        GpuComputePassEncoder cpEnc = gpuCmdBeginComputePass(encoder);
+        if (cpEnc) {
+            ctx.computePass = cpEnc;
+            if (pass.callback) pass.callback(&ctx, pass.userData);
+            gpuCmdEndComputePass(cpEnc);
+        }
+    } else {
+        if (pass.callback) pass.callback(&ctx, pass.userData);
+    }
+}
+
 GpuResult gpuGraphExecute(GpuGraph graph, GpuCommandQueue queue)
 {
     if (!graph || !queue) return GPU_ERROR_INVALID_ARGS;
     if (!graph->compiled) return GPU_ERROR_INVALID_ARGS;
-
-    GpuCommandEncoder encoder = gpuBeginCommandEncoder(graph->device, queue);
-    if (!encoder) return GPU_ERROR_INTERNAL;
 
     for (uint32_t si = 0; si < (uint32_t)graph->executionOrder.size(); si++) {
         uint32_t pi = graph->executionOrder[si];
         auto& pass = *graph->passes[pi];
         if (pass.culled) continue;
 
+        GpuCommandEncoder encoder = gpuBeginCommandEncoder(graph->device, queue);
+        if (!encoder) return GPU_ERROR_INTERNAL;
+
         emitBarriers(graph, encoder, graph->passBarriers[pi]);
+        executeGraphPass(graph, encoder, pi);
 
-        GpuGraphPassContext ctx = {};
-        ctx.encoder = encoder;
-
-        if (pass.kind == GPU_GRAPH_PASS_RENDER) {
-            GpuRenderPassColorAttachment colorAtts[8];
-            for (uint32_t ci = 0; ci < (uint32_t)pass.colorAttachments.size() && ci < 8; ci++) {
-                auto& src = pass.colorAttachments[ci];
-                auto& dst = colorAtts[ci];
-                uint32_t ri = src.resource - 1;
-                auto& res = graph->resources[ri];
-
-                memset(&dst, 0, sizeof(dst));
-                if (res.isSurfaceTexture && res.importedSurfaceTexture) {
-                    dst.attachment = res.importedSurfaceTexture;
-                } else if (res.realizedView.index != 0) {
-                    dst.viewHandle = res.realizedView;
-                } else {
-                    dst.textureHandle = res.imported ? res.importedTexture : res.realizedTexture;
-                }
-                dst.loadOp = src.loadOp;
-                dst.storeOp = src.storeOp;
-                memcpy(dst.clearValue, src.clearColor, sizeof(float) * 4);
-            }
-
-            GpuRenderPassDepthAttachment depthAtt;
-            if (pass.hasDepth) {
-                uint32_t ri = pass.depthAttachment.resource - 1;
-                if (ri < graph->resources.size()) {
-                    auto& res = graph->resources[ri];
-                    memset(&depthAtt, 0, sizeof(depthAtt));
-                    if (gpuHandleIsValid(pass.depthAttachment.depthViewOverride)) {
-                        depthAtt.viewHandle = pass.depthAttachment.depthViewOverride;
-                    } else {
-                        // Create depth-stencil view if needed
-                        if (res.depthView.index == 0) {
-                            GpuTextureHandle texH = res.imported ? res.importedTexture : res.realizedTexture;
-                            gpuCreateTextureView(graph->device, texH, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &res.depthView);
-                        }
-                        depthAtt.viewHandle = res.depthView;
-                    }
-                    depthAtt.depthLoadOp = pass.depthAttachment.loadOp;
-                    depthAtt.depthStoreOp = pass.depthAttachment.storeOp;
-                    depthAtt.clearDepth = pass.depthAttachment.clearDepth;
-                    depthAtt.stencilLoadOp = GPU_LOAD_OP_DONT_CARE;
-                    depthAtt.stencilStoreOp = GPU_STORE_OP_DONT_CARE;
-                    depthAtt.clearStencil = pass.depthAttachment.clearStencil;
-                }
-            }
-
-            GpuRenderPassDesc passDesc = {};
-            passDesc.colorAttachmentCount = (uint32_t)pass.colorAttachments.size();
-            passDesc.colorAttachments = colorAtts;
-            passDesc.depthAttachment = pass.hasDepth ? &depthAtt : nullptr;
-
-            GpuRenderPassEncoder rpEnc = gpuCmdBeginRenderPass(encoder, &passDesc);
-            if (rpEnc) {
-                ctx.renderPass = rpEnc;
-                if (pass.callback) pass.callback(&ctx, pass.userData);
-                gpuCmdEndRenderPass(rpEnc);
-            }
-        } else if (pass.kind == GPU_GRAPH_PASS_COMPUTE) {
-            GpuComputePassEncoder cpEnc = gpuCmdBeginComputePass(encoder);
-            if (cpEnc) {
-                ctx.computePass = cpEnc;
-                if (pass.callback) pass.callback(&ctx, pass.userData);
-                gpuCmdEndComputePass(cpEnc);
-            }
-        } else {
-            if (pass.callback) pass.callback(&ctx, pass.userData);
-        }
-    }
-
-    GpuCommandBuffer cmd = gpuFinishCommandEncoder(encoder);
-    if (cmd) {
-        gpuQueueSubmit(queue, 1, &cmd);
+        GpuCommandBuffer cmd = gpuFinishCommandEncoder(encoder);
+        if (!cmd) return GPU_ERROR_INTERNAL;
+        if (gpuQueueSubmit(queue, 1, &cmd) != GPU_SUCCESS) return GPU_ERROR_INTERNAL;
     }
     return GPU_SUCCESS;
 }

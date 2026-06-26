@@ -2,6 +2,7 @@
 
 #include "core/render_features.h"
 #include "core/render_view_mode.h"
+#include "core/demo_scene.h"
 #include "core/shadow_math.h"
 #include "core/sponza_loader.h"
 #include "core/types.h"
@@ -74,9 +75,8 @@ struct FrameData {
     RenderFeatures features = {};
     RenderViewMode viewMode = RenderViewMode::Final;
 
-    bool lightTestMode = false;
-    bool simpleSceneMode = false;
-    uint32_t lightTestPointCount = 1;
+    const DemoScene* demoScene = nullptr;
+    uint32_t lightTestPointCount = 4;
 
     PlacedPointLights placedPointLights = {};
 

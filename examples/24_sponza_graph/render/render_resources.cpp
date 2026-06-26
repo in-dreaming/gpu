@@ -1,5 +1,6 @@
 #include "render_resources.h"
 #include "render/bindless_bind.h"
+#include <algorithm>
 #include <cstdio>
 
 static uint32_t bindlessAllocateOrFail(GpuBindlessHeap heap, GpuHandle handle)
@@ -127,18 +128,7 @@ bool initRenderResources(RenderResources& r, uint32_t w, uint32_t h, uint32_t ma
     }
 
     // SSGI output (half-res)
-    {
-        GpuTextureDesc td = {};
-        td.type = GPU_TEXTURE_TYPE_2D;
-        td.width = w / 2; td.height = h / 2; td.depth = 1;
-        td.arrayLength = 1; td.mipCount = 1;
-        td.format = GPU_FORMAT_RGBA16_FLOAT;
-        td.usage = GPU_TEXTURE_USAGE_UNORDERED_ACCESS | GPU_TEXTURE_USAGE_SHADER_RESOURCE;
-        td.label = "ssgi_output";
-        if (gpuCreateTexture(r.device, &td, &r.ssgiOutput) != GPU_SUCCESS) return false;
-        gpuCreateTextureView(r.device, r.ssgiOutput, GPU_TEXTURE_VIEW_TYPE_UNORDERED_ACCESS, &r.ssgiOutputUav);
-        gpuCreateTextureView(r.device, r.ssgiOutput, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &r.ssgiOutputSrv);
-    }
+    recreateSsgiOutput(r, w, h);
 
     // SSGI prev frame (for temporal)
     {
@@ -345,6 +335,62 @@ bool refreshGBufferBindlessHandles(RenderResources& r)
                  r.bindless.sceneNormal,
                  GpuHandle{r.sceneNormalSrv.index, r.sceneNormalSrv.generation},
                  GPU_DESCRIPTOR_ACCESS_READ) == GPU_SUCCESS && ok;
+    }
+    return ok;
+}
+
+void recreateSsgiOutput(RenderResources& r, uint32_t w, uint32_t h)
+{
+    if (r.ssgiOutputUav.index) {
+        gpuDestroyTextureView(r.device, r.ssgiOutputUav);
+        r.ssgiOutputUav = GPU_NULL_HANDLE;
+    }
+    if (r.ssgiOutputSrv.index) {
+        gpuDestroyTextureView(r.device, r.ssgiOutputSrv);
+        r.ssgiOutputSrv = GPU_NULL_HANDLE;
+    }
+    if (r.ssgiOutput.index) {
+        gpuDestroyTexture(r.device, r.ssgiOutput);
+        r.ssgiOutput = GPU_NULL_HANDLE;
+    }
+
+    const uint32_t ssgiW = std::max(w, 1u);
+    const uint32_t ssgiH = std::max(h, 1u);
+    GpuTextureDesc td = {};
+    td.type = GPU_TEXTURE_TYPE_2D;
+    td.width = ssgiW;
+    td.height = ssgiH;
+    td.depth = 1;
+    td.arrayLength = 1;
+    td.mipCount = 1;
+    td.format = GPU_FORMAT_RGBA16_FLOAT;
+    td.usage = GPU_TEXTURE_USAGE_UNORDERED_ACCESS | GPU_TEXTURE_USAGE_SHADER_RESOURCE;
+    td.label = "ssgi_output";
+    if (gpuCreateTexture(r.device, &td, &r.ssgiOutput) == GPU_SUCCESS) {
+        gpuCreateTextureView(r.device, r.ssgiOutput, GPU_TEXTURE_VIEW_TYPE_UNORDERED_ACCESS, &r.ssgiOutputUav);
+        gpuCreateTextureView(r.device, r.ssgiOutput, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &r.ssgiOutputSrv);
+    }
+}
+
+bool refreshSsgiBindlessHandles(RenderResources& r)
+{
+    if (!r.textureBindlessHeap) return false;
+    bool ok = true;
+    if (r.bindless.ssgiTexture != UINT32_MAX && r.ssgiOutputSrv.index) {
+        ok = gpuBindlessUpdateTextureView(
+                 r.textureBindlessHeap,
+                 r.bindless.ssgiTexture,
+                 GpuHandle{r.ssgiOutputSrv.index, r.ssgiOutputSrv.generation},
+                 GPU_DESCRIPTOR_ACCESS_READ) == GPU_SUCCESS &&
+             ok;
+    }
+    if (r.bindless.ssgiOutputUav != UINT32_MAX && r.ssgiOutputUav.index) {
+        ok = gpuBindlessUpdateTextureView(
+                 r.textureBindlessHeap,
+                 r.bindless.ssgiOutputUav,
+                 GpuHandle{r.ssgiOutputUav.index, r.ssgiOutputUav.generation},
+                 GPU_DESCRIPTOR_ACCESS_READ_WRITE) == GPU_SUCCESS &&
+             ok;
     }
     return ok;
 }

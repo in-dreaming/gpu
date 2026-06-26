@@ -1,6 +1,6 @@
 #include "pass_callbacks.h"
 #include "render/frame_data.h"
-#include "render/pass_bindings.h"
+#include "pass_bindings.h"
 #include "render/bindless_bind.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/core/gpu_buffer.h"
@@ -141,7 +141,9 @@ static bool updateForwardPassUniforms(ShaderCursor& c, FrameData* d)
     ff.enableDirShadow = d->features.dirShadows ? 1u : 0u;
     ff.enablePointLights = d->features.pointLights ? 1u : 0u;
     ff.enablePointShadows = d->features.pointShadows ? 1u : 0u;
-    ff.enableSSGI = d->features.ssgi ? 1u : 0u;
+    const bool useIndirectGi = d->features.ssgi || d->viewMode == RenderViewMode::Final ||
+                               d->viewMode == RenderViewMode::SSGI;
+    ff.enableSSGI = useIndirectGi ? 1u : 0u;
     ff.enableFog = d->features.fog ? 1u : 0u;
     ff.pointLightCount = d->features.pointLights ? d->features.pointLightCount : 0u;
     if (SLANG_FAILED(fwd["features"].setData(ff))) return false;
@@ -189,6 +191,7 @@ void gbufferPassCallback(GpuGraphPassContext* ctx, void* userData)
     if (!ctx->renderPass || !d->pipelines->gbufferPipeline || !d->pipelines->gbufferRootObj) return;
 
     rhi::IRenderPassEncoder* rpEnc = ctx->renderPass->rhiPassEncoder;
+    if (!bindGbufferFrameResources(*d->pipelines, *d, false)) return;
     {
         ShaderCursor c(d->pipelines->gbufferRootObj);
         c["camera"].setData(d->cameraParams);
@@ -276,6 +279,8 @@ void ssgiPassCallback(GpuGraphPassContext* ctx, void* userData)
     if (!ctx->computePass || !d->pipelines->ssgiPipeline || !d->pipelines->ssgiRootObj) return;
     auto* cpEnc = reinterpret_cast<IComputePassEncoder*>(ctx->computePass);
 
+    if (!bindSsgiFrameResources(*d->pipelines, *d, false)) return;
+
     {
         ShaderCursor c(d->pipelines->ssgiRootObj);
         SSGIParams sp = {};
@@ -283,19 +288,26 @@ void ssgiPassCallback(GpuGraphPassContext* ctx, void* userData)
         sp.cameraPos[0] = d->cameraParams.cameraPos[0];
         sp.cameraPos[1] = d->cameraParams.cameraPos[1];
         sp.cameraPos[2] = d->cameraParams.cameraPos[2];
-        sp.stepSize = 2.0f;
-        sp.maxDistance = 120.0f;
-        sp.thickness = 4.0f;
-        sp.screenWidth = d->surfaceWidth / 2;
-        sp.screenHeight = d->surfaceHeight / 2;
+        sp.stepSize = d->demoScene && d->demoScene->isCompactRoom() ? 0.75f : 1.5f;
+        sp.maxDistance = d->demoScene && d->demoScene->isCompactRoom() ? 120.0f : 160.0f;
+        sp.thickness = 4.5f;
+        sp.normalBias = d->demoScene && d->demoScene->isCompactRoom() ? 0.25f : 0.15f;
+        sp.indirectBoost = 1.8f;
+        sp.screenWidth = d->surfaceWidth;
+        sp.screenHeight = d->surfaceHeight;
         sp.fullWidth = d->surfaceWidth;
         sp.fullHeight = d->surfaceHeight;
         sp.temporalFrame = d->frameIndex;
+        sp.enablePointLights = d->features.pointLights ? 1u : 0u;
+        sp.pointLightCount = d->features.pointLights ? d->features.pointLightCount : 0u;
+        sp.ambientColor[0] = d->ambientColor[0];
+        sp.ambientColor[1] = d->ambientColor[1];
+        sp.ambientColor[2] = d->ambientColor[2];
         c["gSSGI"].setData(sp);
     }
 
     cpEnc->bindPipeline(d->pipelines->ssgiPipeline, d->pipelines->ssgiRootObj);
-    cpEnc->dispatchCompute(((d->surfaceWidth / 2) + 7) / 8, ((d->surfaceHeight / 2) + 7) / 8, 1);
+    cpEnc->dispatchCompute((d->surfaceWidth + 7) / 8, (d->surfaceHeight + 7) / 8, 1);
 }
 
 void lightCullPassCallback(GpuGraphPassContext* ctx, void* userData)

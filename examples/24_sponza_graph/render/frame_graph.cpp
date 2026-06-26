@@ -182,7 +182,6 @@ bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
         const uint32_t pointShadowSlots = effectivePointShadowSlotCount(fd);
         for (uint32_t pi = 0; pi < pointShadowSlots; pi++) gpuGraphPassRead(fp, pointShadowRes[pi]);
     }
-    if (features.ssgi) gpuGraphPassRead(fp, ssgiRes);
     if (features.pointLights) gpuGraphPassRead(fp, lightBufRes);
     gpuGraphPassSetCallback(fp, forwardPassCallback, &fd);
 

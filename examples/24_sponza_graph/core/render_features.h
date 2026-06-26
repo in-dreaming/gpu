@@ -6,7 +6,6 @@
 #include <cstdlib>
 
 // Incremental feature toggles for demo24 run testing.
-// Default: directional light + ambient only (no shadows / points / SSGI).
 struct RenderFeatures {
     bool dirLight = true;
     bool dirShadows = false;
@@ -26,6 +25,15 @@ inline void renderFeaturesSetBase(RenderFeatures& f)
     f.dirShadows = true;
     f.fog = true;
     f.pointLightCount = 0;
+}
+
+// Default for bare `24_sponza_graph.exe` (Sponza asset scene).
+inline void renderFeaturesSetSponzaDefault(RenderFeatures& f)
+{
+    renderFeaturesSetBase(f);
+    f.pointLights = true;
+    f.pointShadows = true;
+    f.pointLightCount = 4;
 }
 
 inline void renderFeaturesEnableAll(RenderFeatures& f)
@@ -65,7 +73,7 @@ inline bool renderFeaturesParseToken(RenderFeatures& f, const char* token)
         if (f.pointLightCount == 0) f.pointLightCount = 1024;
         return true;
     }
-    if (strcmp(token, "point-shadows") == 0) {
+    if (strcmp(token, "point-shadows") == 0 || strcmp(token, "pointshadows") == 0) {
         f.pointLights = true;
         f.pointShadows = true;
         if (f.pointLightCount == 0) f.pointLightCount = 1024;
@@ -133,6 +141,9 @@ inline bool renderFeaturesParseList(RenderFeatures& f, const char* csv)
         f.pointLights = true;
         f.dirShadows = true;
         if (f.pointLightCount == 0) f.pointLightCount = 1024;
+    } else if (f.pointLights && f.pointLightCount > 0 && f.pointLightCount <= 8u) {
+        // A small fixed light count implies the demo default; keep cube shadows in sync.
+        f.pointShadows = true;
     }
     if (f.pointLights && f.pointLightCount == 0) f.pointLightCount = 1024;
     return true;

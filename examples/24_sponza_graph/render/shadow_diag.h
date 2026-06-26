@@ -22,9 +22,14 @@ struct ColorBufferStats {
     float minLuma = 0.0f;
     float maxLuma = 0.0f;
     float meanLuma = 0.0f;
+    float centerMinLuma = 0.0f;
+    float centerMaxLuma = 0.0f;
+    float centerMeanLuma = 0.0f;
     uint32_t pixelsNearWhite = 0;
     uint32_t pixelsNearBlack = 0;
     uint32_t pixelsMid = 0;
+    uint32_t centerPixelsNearBlack = 0;
+    uint32_t centerPixelCount = 0;
     uint32_t width = 0;
     uint32_t height = 0;
     bool readbackOk = false;
@@ -41,6 +46,7 @@ bool shadowDiagCheckLightTestFinal(const ColorBufferStats& stats, uint32_t point
 bool shadowDiagCheckDefaultLightTestPoints(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize);
 bool shadowDiagCheckDefaultLightTestShadow(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize);
 bool shadowDiagCheckDefaultLightTestFinal(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize);
+bool shadowDiagCheckSsgiView(const ColorBufferStats& stats, char* failMsg, size_t failMsgSize);
 bool shadowDiagCheckPointShadowDepth(GpuDevice device, GpuTextureHandle cubeTex, char* failMsg, size_t failMsgSize);
 void shadowDiagPrintColorStats(const ColorBufferStats& stats, const char* label);
 void shadowDiagPrintBindingState(const FrameData& frame, DemoPipelines& pipelines);

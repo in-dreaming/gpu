@@ -64,11 +64,18 @@ struct SSGIParams {
     float stepSize;
     float maxDistance;
     float thickness;
+    float normalBias;
+    float indirectBoost;
     uint32_t screenWidth;
     uint32_t screenHeight;
     uint32_t fullWidth;
     uint32_t fullHeight;
     uint32_t temporalFrame;
+    uint32_t enablePointLights;
+    uint32_t pointLightCount;
+    float pad1[2];
+    float ambientColor[3];
+    float pad2;
 };
 
 struct LightUniforms {

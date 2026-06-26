@@ -25,8 +25,8 @@ struct SimpleSceneLighting {
 struct SimpleLightTestLayout {
     Vec3 clusterCenter = {0.0f, 0.35f * kSimpleSceneWorldScale, 0.0f};
     float clusterHalfExtent = 1.15f * kSimpleSceneWorldScale;
-    float lightHeight = 2.85f * kSimpleSceneWorldScale;
-    float lightRadius = 2.4f * kSimpleSceneWorldScale;
+    float lightHeight = 2.4f * kSimpleSceneWorldScale;
+    float lightRadius = 1.35f * kSimpleSceneWorldScale;
     float lightPairSeparation = 0.55f * kSimpleSceneWorldScale;
 };
 

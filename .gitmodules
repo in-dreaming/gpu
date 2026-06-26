@@ -10,3 +10,6 @@
 	path = modules/3rd/slang
 	url = https://github.com/in-dreaming/slang.git
 	branch = master
+[submodule "modules/3rd/Sponza"]
+	path = modules/3rd/Sponza
+	url = https://github.com/jimmiebergmann/Sponza.git

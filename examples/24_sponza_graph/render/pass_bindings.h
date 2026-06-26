@@ -11,3 +11,9 @@ bool bindForwardFrameResources(DemoPipelines& pipelines, const FrameData& frame,
 
 // Re-bind forward shadow map SRVs each frame (graphics pass direct binding).
 bool bindForwardShadowResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures = false);
+
+// Re-bind gbuffer pass GPU resources each frame.
+bool bindGbufferFrameResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures = false);
+
+// Re-bind SSGI compute inputs/output each frame.
+bool bindSsgiFrameResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures = false);

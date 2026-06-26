@@ -68,10 +68,34 @@ static bool bindPointLightBuffer(rhi::ShaderCursor cursor, const FrameData& fram
     return shaderCursorSetBinding(cursor, "pointLights", buf, logFailures ? "pointLights" : nullptr);
 }
 
+static bool bindSsgiPassCursorResources(rhi::ShaderCursor cursor, const FrameData& frame, bool logFailures)
+{
+    if (!frame.device || !frame.resources) return false;
+    const RenderResources& res = *frame.resources;
+    bool ok = true;
+    auto* albedo = static_cast<rhi::ITextureView*>(frame.device->textureViewPool.resolve(
+        res.sceneAlbedoSrv.index, res.sceneAlbedoSrv.generation));
+    auto* normal = static_cast<rhi::ITextureView*>(frame.device->textureViewPool.resolve(
+        res.sceneNormalSrv.index, res.sceneNormalSrv.generation));
+    auto* depth = static_cast<rhi::ITextureView*>(frame.device->textureViewPool.resolve(
+        res.sceneDepthSrv.index, res.sceneDepthSrv.generation));
+    auto* output = static_cast<rhi::ITextureView*>(frame.device->textureViewPool.resolve(
+        res.ssgiOutputUav.index, res.ssgiOutputUav.generation));
+    auto* sampler = static_cast<rhi::ISampler*>(frame.device->samplerPool.resolve(
+        res.linearSampler.index, res.linearSampler.generation));
+    ok = shaderCursorSetBinding(cursor, "albedoTexture", albedo, logFailures ? "albedoTexture" : nullptr) && ok;
+    ok = shaderCursorSetBinding(cursor, "normalTexture", normal, logFailures ? "normalTexture" : nullptr) && ok;
+    ok = shaderCursorSetBinding(cursor, "depthTexture", depth, logFailures ? "depthTexture" : nullptr) && ok;
+    ok = shaderCursorSetBinding(cursor, "sceneSampler", sampler, logFailures ? "sceneSampler" : nullptr) && ok;
+    ok = shaderCursorSetBinding(cursor, "outputTexture", output, logFailures ? "outputTexture" : nullptr) && ok;
+    if (frame.resources->lightBuffer.index)
+        ok = bindPointLightBuffer(cursor, frame, logFailures) && ok;
+    return ok;
+}
+
 static bool bindForwardPassResources(rhi::IShaderObject* root, const FrameData& frame, bool logFailures)
 {
     if (!root) return false;
-    const RenderResources& res = *frame.resources;
     ShaderCursor c(root);
     bool ok = true;
 
@@ -83,10 +107,6 @@ static bool bindForwardPassResources(rhi::IShaderObject* root, const FrameData& 
 
     if (frame.features.pointLights)
         ok = bindPointLightBuffer(c, frame, logFailures) && ok;
-    ok = shaderCursorSetBindlessHeap(c, "ssgiTexture", res.textureBindlessHeap, res.bindless.ssgiTexture,
-                                       logFailures ? "ssgiTexture" : nullptr) && ok;
-    ok = shaderCursorSetBindlessHeap(c, "ssgiSampler", res.samplerBindlessHeap, res.bindless.linearSampler,
-                                       logFailures ? "ssgiSampler" : nullptr) && ok;
     return ok;
 }
 
@@ -102,20 +122,8 @@ static bool bindGbufferPassResources(rhi::IShaderObject* root, const FrameData& 
 static bool bindSsgiPassResources(rhi::IShaderObject* root, const FrameData& frame, bool logFailures)
 {
     if (!root) return false;
-    const RenderResources& res = *frame.resources;
     ShaderCursor c(root);
-    bool ok = true;
-    ok = shaderCursorSetBindlessHeap(c, "albedoTexture", res.textureBindlessHeap, res.bindless.sceneAlbedo,
-                                       logFailures ? "albedoTexture" : nullptr) && ok;
-    ok = shaderCursorSetBindlessHeap(c, "normalTexture", res.textureBindlessHeap, res.bindless.sceneNormal,
-                                       logFailures ? "normalTexture" : nullptr) && ok;
-    ok = shaderCursorSetBindlessHeap(c, "depthTexture", res.textureBindlessHeap, res.bindless.sceneDepth,
-                                       logFailures ? "depthTexture" : nullptr) && ok;
-    ok = shaderCursorSetBindlessHeap(c, "sceneSampler", res.samplerBindlessHeap, res.bindless.linearSampler,
-                                       logFailures ? "sceneSampler" : nullptr) && ok;
-    ok = shaderCursorSetBindlessHeap(c, "outputTexture", res.textureBindlessHeap, res.bindless.ssgiOutputUav,
-                                       logFailures ? "outputTexture" : nullptr) && ok;
-    return ok;
+    return bindSsgiPassCursorResources(c, frame, logFailures);
 }
 
 static bool bindLightCullPassResources(rhi::IShaderObject* root, const FrameData& frame, bool logFailures)
@@ -146,6 +154,18 @@ bool bindForwardFrameResources(DemoPipelines& pipelines, const FrameData& frame,
     if (frame.features.pointLights)
         ok = bindPointLightBuffer(c, frame, logFailures) && ok;
     return ok;
+}
+
+bool bindGbufferFrameResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)
+{
+    return bindGbufferPassResources(pipelines.gbufferRootObj.get(), frame, logFailures);
+}
+
+bool bindSsgiFrameResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)
+{
+    if (!pipelines.ssgiRootObj) return false;
+    ShaderCursor c(pipelines.ssgiRootObj.get());
+    return bindSsgiPassCursorResources(c, frame, logFailures);
 }
 
 bool bindForwardShadowResources(DemoPipelines& pipelines, const FrameData& frame, bool logFailures)

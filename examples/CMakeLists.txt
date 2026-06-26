@@ -108,18 +108,7 @@ target_include_directories(21_sponza_data_driven PRIVATE
 )
 
 if(GPU_SPONZA_ROOT)
-    if(EXISTS "${GPU_SPONZA_ROOT}/sponza.obj" AND EXISTS "${GPU_SPONZA_ROOT}/sponza.mtl")
-        add_custom_command(TARGET 21_sponza_data_driven POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${GPU_SPONZA_ROOT}"
-                "$<TARGET_FILE_DIR:21_sponza_data_driven>/Sponza"
-        )
-        if(GPU_INSTALL)
-            install(DIRECTORY "${GPU_SPONZA_ROOT}/" DESTINATION ${CMAKE_INSTALL_BINDIR}/Sponza)
-        endif()
-    else()
-        message(WARNING "GPU_SPONZA_ROOT is set, but sponza.obj/sponza.mtl were not found: ${GPU_SPONZA_ROOT}")
-    endif()
+    gpu_setup_sponza_assets(21_sponza_data_driven)
 endif()
 
 if(GPU_INSTALL)
@@ -134,6 +123,7 @@ set(24_SPONZA_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/dir_light_control.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/shadow_math.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/simple_scene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/demo_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/core/sponza_loader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/render_resources.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/24_sponza_graph/render/material_textures.cpp
@@ -198,16 +188,7 @@ foreach(_shader shadow.slang gbuffer.slang forward.slang ssgi.slang light_cull.s
 endforeach()
 
 if(GPU_SPONZA_ROOT)
-    if(EXISTS "${GPU_SPONZA_ROOT}/sponza.obj" AND EXISTS "${GPU_SPONZA_ROOT}/sponza.mtl")
-        add_custom_command(TARGET 24_sponza_graph POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${GPU_SPONZA_ROOT}"
-                "$<TARGET_FILE_DIR:24_sponza_graph>/Sponza"
-        )
-        if(GPU_INSTALL)
-            install(DIRECTORY "${GPU_SPONZA_ROOT}/" DESTINATION ${CMAKE_INSTALL_BINDIR}/Sponza)
-        endif()
-    endif()
+    gpu_setup_sponza_assets(24_sponza_graph)
 endif()
 
 if(GPU_INSTALL)
