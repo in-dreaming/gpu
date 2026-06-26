@@ -505,6 +505,12 @@ int main(int argc, char** argv)
     fd.rhiIndexBuffer = rhiIB;
     fd.lightCount = features.pointLights ? features.pointLightCount : 0;
 
+    static char diagGraphJsonPath[kMaxPathText] = {};
+    if (dumpShadow && dumpShadowDir[0] != '\0') {
+        snprintf(diagGraphJsonPath, sizeof(diagGraphJsonPath), "%s/shadow_diag_graph.json", dumpShadowDir);
+        fd.diagGraphJsonPath = diagGraphJsonPath;
+    }
+
     if (diagShadow) {
         printf("=== Shadow diagnostics (--diag-shadow) ===\n");
         shadowDiagVerifyShaderLayout(pipelines);

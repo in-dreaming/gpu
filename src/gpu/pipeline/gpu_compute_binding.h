@@ -13,8 +13,6 @@ typedef struct GpuComputeBinding_t* GpuComputeBinding;
 
 GpuResult gpuCreateComputeBinding(GpuDevice device, GpuComputePipeline pipeline, GpuComputeBinding* outBinding);
 void gpuDestroyComputeBinding(GpuComputeBinding binding);
-GpuResult gpuComputeBindingSetBuffer(GpuComputeBinding binding, const char* fieldName, GpuBufferHandle buffer);
-void gpuCmdBindComputeBinding(GpuComputePassEncoder pass, GpuComputePipeline pipeline, GpuComputeBinding binding);
 GpuResult gpuComputeBindingDispatch(GpuComputeBinding binding, GpuComputePassEncoder pass,
                                     const char* bufferFieldName, GpuBufferHandle buffer,
                                     uint32_t x, uint32_t y, uint32_t z);

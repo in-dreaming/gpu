@@ -10,3 +10,5 @@ build/
 *.dll
 *.exe
 *.log
+.specstory/
+shadow_diag_graph.json

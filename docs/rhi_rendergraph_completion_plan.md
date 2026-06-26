@@ -11,11 +11,11 @@
 | RHI pipeline | 已有 graphics / compute pipeline | `src/gpu/core/gpu_pipeline.h` | baseline 完成 |
 | descriptor | 有 descriptor pool 统计与 bindless descriptor handle | `src/gpu/bindless/*` | 普通 descriptor set 不完整 |
 | bindless baseline | 有 texture / buffer / sampler slot 分配和 lookup | `src/gpu/bindless/gpu_bindless_heap.cpp` | baseline 完成 |
-| graphics / compute queue | API 有 graphics / compute / transfer | `src/gpu/core/gpu_command.h` | 实际同一 graphics queue |
+| graphics / compute queue | API 有 graphics / compute / transfer；Vulkan/D3D12/Metal 为独立队列 | `gpuGetQueueInfo`, `gpu_device.cpp` | baseline 完成 |
 | barrier | 有 resource state API 和 graph 内状态推导 | `src/gpu/resource/gpu_barrier.*` | baseline 完成，hazard tracking 不完整 |
 | timestamp / marker | 有 timestamp query pool、frequency、debug marker | `src/gpu/queue/gpu_multi_queue.*`, `src/gpu/debug/*` | baseline 完成 |
 | RenderGraph pass / resource | 有 logical resource、import、pass、callback | `src/gpu/rendergraph/gpu_render_graph.*` | baseline 完成 |
-| transient texture | compile 时创建非 imported resource，destroy/reset 释放 | `gpuGraphCompile`, `gpuGraphDestroy` | 缺 allocator / aliasing |
+| transient texture | compile 时创建非 imported resource，destroy/reset 释放；Vulkan 支持 placed heap 原型 | `gpuGraphCompile`, `gpu_transient_heap.*` | 池化完成；通用 heap aliasing 未完成 |
 | barrier tracking | 按 pass access 生成 state transition | `gpuGraphCompile` | 缺 subresource / queue ownership / diagnostics |
 | debug graph | DOT / JSON export | `gpuGraphExportDot`, `gpuGraphExportJson` | baseline 完成 |
 
@@ -30,9 +30,9 @@
 
 ## 1. Queue 能力改造
 
-### 当前问题
+### 当前问题（已部分解决）
 
-`gpuCreateDevice` 中 compute / transfer queue 当前指向 graphics queue。这可以支撑功能测试，但不应被上层误认为拥有独立异步队列。
+独立队列已在 Vulkan / D3D12 / Metal 落地；WebGPU / D3D11 / CPU / CUDA 仍为 alias。剩余工作：更完整的 queue ownership barrier 诊断与 CUDA 多 stream。
 
 ### 建议改造
 

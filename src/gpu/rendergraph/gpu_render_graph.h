@@ -105,6 +105,7 @@ void gpuGraphSetPassProfiling(GpuGraph graph, bool enabled);
 bool gpuGraphGetPassProfiling(GpuGraph graph);
 
 GpuResult gpuGraphCompile(GpuGraph graph);
+/* queue is used for SINGLE_COMMAND_BUFFER and PASS_SUBMIT; ignored for MULTI_QUEUE (queues resolved internally). */
 GpuResult gpuGraphExecute(GpuGraph graph, GpuCommandQueue queue);
 
 GpuTextureHandle gpuGraphGetTexture(GpuGraph graph, GpuGraphResource resource);

@@ -215,7 +215,8 @@ bool executeSponzaFrameGraph(const FrameGraphContext& ctx)
                        plans[ai].firstUsePass, plans[ai].lastUsePass, plans[ai].poolIndex,
                        plans[ai].objectAliased ? 1 : 0, plans[ai].heapPlaced ? 1 : 0);
             }
-            gpuGraphExportJson(graph, "shadow_diag_graph.json");
+            if (fd.diagGraphJsonPath && fd.diagGraphJsonPath[0] != '\0')
+                gpuGraphExportJson(graph, fd.diagGraphJsonPath);
         }
 
         GpuCommandQueue queue = nullptr;

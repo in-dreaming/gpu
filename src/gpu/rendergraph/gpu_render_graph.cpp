@@ -1036,7 +1036,7 @@ GpuResult gpuGraphCompile(GpuGraph graph)
             graph->timestampPool = nullptr;
         }
         if (graph->timestampQueryCount > 0) {
-            if (gpuCreateQueryPool(graph->device, graph->timestampQueryCount, &graph->timestampPool) != GPU_OK) {
+            if (gpuCreateQueryPool(graph->device, graph->timestampQueryCount, &graph->timestampPool) != GPU_SUCCESS) {
                 graph->validationWarnings.push_back("failed to create timestamp query pool for pass profiling");
                 graph->enablePassProfiling = false;
                 graph->timestampQueryCount = 0;
@@ -1314,7 +1314,7 @@ static GpuResult executeMultiQueue(GpuGraph graph)
     GpuFence fence = nullptr;
     const bool needFence = segments.size() > 1;
     if (needFence) {
-        if (gpuCreateFence(graph->device, 0, &fence) != GPU_OK) return GPU_ERROR_INTERNAL;
+        if (gpuCreateFence(graph->device, 0, &fence) != GPU_SUCCESS) return GPU_ERROR_INTERNAL;
     }
 
     uint32_t profileQueryIndex = 0;
@@ -1347,7 +1347,7 @@ static GpuResult executeMultiQueue(GpuGraph graph)
         }
 
         GpuResult submitRes = gpuQueueSubmitWithSync(queue, 0, nullptr, 1, &cmd, signalPtr);
-        if (submitRes != GPU_OK) {
+        if (submitRes != GPU_SUCCESS) {
             if (fence) gpuDestroyFence(graph->device, fence);
             return GPU_ERROR_INTERNAL;
         }
@@ -1616,17 +1616,17 @@ GpuResult gpuGraphGetPassGpuDurationMs(GpuGraph graph, uint32_t passIndex, float
     GpuResult result = GPU_ERROR_INTERNAL;
     for (int attempt = 0; attempt < 32; attempt++) {
         result = gpuQueryPoolGetResults(graph->timestampPool, beginQi, 2, timestamps);
-        if (result == GPU_OK && timestamps[1] >= timestamps[0]) break;
+        if (result == GPU_SUCCESS && timestamps[1] >= timestamps[0]) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    if (result != GPU_OK) return result;
+    if (result != GPU_SUCCESS) return result;
 
     GpuCommandQueue queue = nullptr;
     if (gpuGetQueue(graph->device, GPU_QUEUE_TYPE_GRAPHICS, &queue) != GPU_SUCCESS)
         return GPU_ERROR_INTERNAL;
 
     uint64_t frequency = 0;
-    if (gpuGetQueueTimestampFrequency(queue, &frequency) != GPU_OK || frequency == 0)
+    if (gpuGetQueueTimestampFrequency(queue, &frequency) != GPU_SUCCESS || frequency == 0)
         return GPU_ERROR_INTERNAL;
 
     *outDurationMs = (float)((timestamps[1] - timestamps[0]) * 1000.0 / (double)frequency);

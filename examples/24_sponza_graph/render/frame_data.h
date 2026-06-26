@@ -84,6 +84,7 @@ struct FrameData {
     uint32_t diagShadowPasses = 0;
     uint32_t diagShadowDraws = 0;
     bool diagForwardUniformOk = false;
+    const char* diagGraphJsonPath = nullptr;
 
     rhi::ComPtr<rhi::IBuffer> rhiVertexBuffer;
     rhi::ComPtr<rhi::IBuffer> rhiIndexBuffer;

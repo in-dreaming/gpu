@@ -67,7 +67,6 @@
 #include "gpu/bindless/gpu_descriptor_set.h"
 
 // Capability (Phase 3)
-#include "gpu/capability/gpu_feature_gating.h"
 #include "gpu/capability/gpu_fallback_registry.h"
 
 // AI / Neural Compute (Phase 3)

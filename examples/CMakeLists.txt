@@ -93,6 +93,9 @@ add_gpu_example(07_compute_pipeline SHADERS prefix_sum.slang)
 add_gpu_example(22_triangle_graph SHADERS triangle.slang)
 add_gpu_example(23_readback_graph SHADERS triangle.slang)
 add_gpu_example(25_async_compute_graph SHADERS fill.slang triangle.slang)
+if(MSVC)
+    set_target_properties(25_async_compute_graph PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+endif()
 
 # Phase 3 Examples
 add_gpu_example(13_backend_switch)

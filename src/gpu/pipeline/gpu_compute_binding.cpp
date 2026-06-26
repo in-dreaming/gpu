@@ -31,21 +31,6 @@ void gpuDestroyComputeBinding(GpuComputeBinding binding)
     delete binding;
 }
 
-GpuResult gpuComputeBindingSetBuffer(GpuComputeBinding binding, const char* fieldName, GpuBufferHandle buffer)
-{
-    (void)binding;
-    (void)fieldName;
-    (void)buffer;
-    return GPU_SUCCESS;
-}
-
-void gpuCmdBindComputeBinding(GpuComputePassEncoder pass, GpuComputePipeline pipeline, GpuComputeBinding binding)
-{
-    (void)pass;
-    (void)pipeline;
-    (void)binding;
-}
-
 GpuResult gpuComputeBindingDispatch(GpuComputeBinding binding, GpuComputePassEncoder pass,
                                     const char* bufferFieldName, GpuBufferHandle buffer,
                                     uint32_t x, uint32_t y, uint32_t z)
