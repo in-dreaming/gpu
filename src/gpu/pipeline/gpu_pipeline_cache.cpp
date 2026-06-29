@@ -3,6 +3,7 @@
 #endif
 #include "gpu/pipeline/gpu_pipeline_cache.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/core/gpu_strutil.h"
 #include "gpu/pipeline/gpu_pipeline_state.h"
 #include <string.h>
 #include <stdlib.h>
@@ -281,7 +282,7 @@ GpuResult gpuCreatePipelineCache(GpuDevice device, const GpuPipelineCacheDesc* d
     }
     
     memset(cache, 0, sizeof(struct GpuPipelineCache_t));
-    cache->cachePath = desc && desc->cachePath ? _strdup(desc->cachePath) : NULL;
+    cache->cachePath = desc && desc->cachePath ? gpuStrdup(desc->cachePath) : NULL;
     cache->entries = NULL;
     cache->entryCount = 0;
     cache->hitCount = 0;

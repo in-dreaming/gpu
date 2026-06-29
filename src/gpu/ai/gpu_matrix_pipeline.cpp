@@ -20,17 +20,6 @@
 #pragma warning(pop)
 #endif
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
-#ifdef _MSC_VER
-#pragma warning(disable : 4996)
-#endif
-
 extern rhi::IComputePipeline* gpuResolveComputePipeline(GpuDevice device, GpuPipelineHandle pipeline);
 
 static const char* s_matmulShaderFormat = R"(
@@ -80,14 +69,7 @@ static std::string matmulCacheKey(uint32_t m, uint32_t n, uint32_t k) {
 }
 
 static bool writeShaderToTempFile(const char* content, std::string& outPath) {
-    char tempDir[MAX_PATH];
-    GetTempPathA(MAX_PATH, tempDir);
-    outPath = std::string(tempDir) + "gpu_matmul.slang";
-    FILE* f = fopen(outPath.c_str(), "w");
-    if (!f) return false;
-    fputs(content, f);
-    fclose(f);
-    return true;
+    return gpuWriteTextTempFile("gpu_matmul.slang", content, outPath);
 }
 
 static std::string makeMatmulShaderSource(uint32_t m, uint32_t n, uint32_t k)

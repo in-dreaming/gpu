@@ -1,5 +1,6 @@
 #include "gpu/layout/gpu_shader_object.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/core/gpu_strutil.h"
 #include "gpu/reflection/gpu_type_info.h"
 #include "gpu/pipeline/gpu_pipeline_state.h"
 #include <slang-rhi.h>
@@ -55,7 +56,7 @@ GpuResult gpuCreateShaderObject(GpuDevice device, const GpuShaderObjectDesc* des
     }
     
     obj->pipeline = desc->pipeline;
-    obj->entryPoint = desc->entryPoint ? _strdup(desc->entryPoint) : NULL;
+    obj->entryPoint = desc->entryPoint ? gpuStrdup(desc->entryPoint) : NULL;
     obj->typeInfo = (GpuTypeInfo*)desc->typeInfo;
     obj->size = desc->typeInfo->size;
     obj->cpuData = (uint8_t*)malloc(obj->size);

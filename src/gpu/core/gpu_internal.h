@@ -5,6 +5,8 @@
 #include <string>
 #include <map>
 #include <mutex>
+#include <filesystem>
+#include <cstdio>
 #include "gpu/core/gpu_format.h"
 #include "gpu/core/gpu_buffer.h"
 #include "gpu/core/gpu_texture.h"
@@ -282,4 +284,23 @@ static inline rhi::TextureType gpuTextureTypeToRhi(GpuTextureType type)
     case GPU_TEXTURE_TYPE_CUBE: return rhi::TextureType::TextureCube;
     default:                    return rhi::TextureType::Texture2D;
     }
+}
+
+inline bool gpuWriteTextTempFile(const char* fileName, const char* content, std::string& outPath)
+{
+    outPath = (std::filesystem::temp_directory_path() / fileName).string();
+#ifdef _MSC_VER
+    FILE* file = nullptr;
+    if (fopen_s(&file, outPath.c_str(), "w") != 0 || !file) {
+        return false;
+    }
+#else
+    FILE* file = std::fopen(outPath.c_str(), "w");
+    if (!file) {
+        return false;
+    }
+#endif
+    std::fputs(content, file);
+    std::fclose(file);
+    return true;
 }

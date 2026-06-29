@@ -9,17 +9,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
-#ifdef _MSC_VER
-#pragma warning(disable : 4996)
-#endif
-
 extern rhi::IComputePipeline* gpuResolveComputePipeline(GpuDevice device, GpuPipelineHandle pipeline);
 
 static const char* s_denseLayerShader = R"(
@@ -81,14 +70,7 @@ struct GpuNeuralNetwork_t {
 };
 
 static bool writeNeuralShaderToTempFile(std::string& outPath) {
-    char tempDir[MAX_PATH];
-    GetTempPathA(MAX_PATH, tempDir);
-    outPath = std::string(tempDir) + "gpu_neural_dense.slang";
-    FILE* f = fopen(outPath.c_str(), "w");
-    if (!f) return false;
-    fputs(s_denseLayerShader, f);
-    fclose(f);
-    return true;
+    return gpuWriteTextTempFile("gpu_neural_dense.slang", s_denseLayerShader, outPath);
 }
 
 static GpuResult ensureDensePipeline(GpuDevice device, GpuNeuralNetwork_t* net) {

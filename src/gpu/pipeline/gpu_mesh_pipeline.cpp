@@ -9,26 +9,9 @@
 
 extern void ensureRenderPass(GpuCommandBuffer_t* buf);
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
-#ifdef _MSC_VER
-#pragma warning(disable : 4996)
-#endif
-
 static bool writeShaderToTempFile(const char* content, const char* suffix, std::string& outPath) {
-    char tempDir[MAX_PATH];
-    GetTempPathA(MAX_PATH, tempDir);
-    outPath = std::string(tempDir) + "gpu_mesh_" + suffix + ".slang";
-    FILE* f = fopen(outPath.c_str(), "w");
-    if (!f) return false;
-    fputs(content, f);
-    fclose(f);
-    return true;
+    std::string fileName = std::string("gpu_mesh_") + suffix + ".slang";
+    return gpuWriteTextTempFile(fileName.c_str(), content, outPath);
 }
 
 GpuResult gpuCreateMeshPipeline(GpuDevice device, const GpuMeshPipelineDesc* desc, GpuPipelineHandle* outPipeline) {

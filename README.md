@@ -51,6 +51,18 @@ ctest --preset ci
 
 See [.github/workflows/ci.yml](.github/workflows/ci.yml) for the full matrix (Debug + Release per OS).
 
+Local reproduction (matches CI flags):
+
+```powershell
+# Native Windows (MSVC + Ninja)
+.\scripts\ci-local.ps1 -Config Release
+```
+
+```bash
+# WSL2 / Linux
+./scripts/ci-local.sh Release
+```
+
 Key regression suites:
 
 ```bash

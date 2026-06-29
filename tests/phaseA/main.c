@@ -1,4 +1,5 @@
 #include "gpu/gpu.h"
+#include "gpu/core/gpu_strutil.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,8 +29,8 @@ static void testValidationCallback(const GpuValidationMessage* msg, void* userDa
     (void)userData;
     s_validationCount++;
     s_lastSeverity = msg->severity;
-    strncpy_s(s_lastMessageId, sizeof(s_lastMessageId), msg->messageId ? msg->messageId : "", 63);
-    strncpy_s(s_lastMessage, sizeof(s_lastMessage), msg->message ? msg->message : "", 255);
+    gpuStrncpy(s_lastMessageId, sizeof(s_lastMessageId), msg->messageId ? msg->messageId : "", 63);
+    gpuStrncpy(s_lastMessage, sizeof(s_lastMessage), msg->message ? msg->message : "", 255);
 }
 
 static void flush(void) { fflush(stdout); fflush(stderr); }

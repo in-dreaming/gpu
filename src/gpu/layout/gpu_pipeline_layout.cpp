@@ -118,7 +118,8 @@ struct BindingRangeAccumulator {
             range.kind = kind;
 
             SlangInt count = typeLayout->getBindingRangeBindingCount(i);
-            range.count = (count == SLANG_UNBOUNDED_SIZE || count == SLANG_UNKNOWN_SIZE)
+            const size_t countValue = count < 0 ? 0u : static_cast<size_t>(count);
+            range.count = (countValue == SLANG_UNBOUNDED_SIZE || countValue == SLANG_UNKNOWN_SIZE)
                           ? UINT32_MAX : (uint32_t)count;
 
             // Get descriptor set index and binding index

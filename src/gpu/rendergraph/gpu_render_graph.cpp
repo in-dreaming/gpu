@@ -1636,6 +1636,7 @@ GpuResult gpuGraphGetPassGpuDurationMs(GpuGraph graph, uint32_t passIndex, float
 bool gpuDeviceSupportsIndependentQueues(GpuDevice device)
 {
     if (!device) return false;
+    if (device->computeQueueIsAlias || device->transferQueueIsAlias) return false;
     GpuQueueInfo computeInfo = {};
     GpuQueueInfo transferInfo = {};
     if (gpuGetQueueInfo(device, GPU_QUEUE_TYPE_COMPUTE, &computeInfo) != GPU_SUCCESS) return false;

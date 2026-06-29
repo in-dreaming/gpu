@@ -1,3 +1,5 @@
+include("${CMAKE_SOURCE_DIR}/cmake/GpuRuntimeCopy.cmake")
+
 function(add_gpu_example NAME)
     cmake_parse_arguments(ARG "" "" "SHADERS" ${ARGN})
 
@@ -21,33 +23,10 @@ function(add_gpu_example NAME)
         target_compile_options(${NAME} PRIVATE -Wall -Wextra -Werror -pedantic)
     endif()
 
-    add_dependencies(${NAME} slang-rhi-copy-files)
+    gpu_stage_runtime_deps(${NAME})
 
     set(_out_dir "$<TARGET_FILE_DIR:${NAME}>")
     set(_rhi_dir "${CMAKE_BINARY_DIR}/modules/3rd/slang-rhi")
-
-    add_custom_command(TARGET ${NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}/D3D12"
-    )
-
-    foreach(_dll
-        slang.dll slang-compiler.dll slang-glslang.dll slang-llvm.dll slang-rt.dll
-        dxcompiler.dll dxil.dll WinPixEventRuntime.dll dawn.dll
-    )
-        add_custom_command(TARGET ${NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_rhi_dir}/${_dll}" "${_out_dir}/${_dll}"
-        )
-    endforeach()
-
-    foreach(_dll D3D12/D3D12Core.dll D3D12/d3d12SDKLayers.dll)
-        add_custom_command(TARGET ${NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_rhi_dir}/${_dll}" "${_out_dir}/${_dll}"
-        )
-    endforeach()
-
-    add_custom_command(TARGET ${NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3-shared>" "${_out_dir}/"
-    )
 
     if(ARG_SHADERS)
         foreach(_shader ${ARG_SHADERS})
@@ -159,30 +138,9 @@ target_include_directories(24_sponza_graph PRIVATE
     "${CMAKE_SOURCE_DIR}/examples/24_sponza_graph"
     "${CMAKE_SOURCE_DIR}/modules/3rd/slang-rhi/external/stb"
 )
-add_dependencies(24_sponza_graph slang-rhi-copy-files)
+gpu_stage_runtime_deps(24_sponza_graph)
 
 set(_out_dir "$<TARGET_FILE_DIR:24_sponza_graph>")
-set(_rhi_dir "${CMAKE_BINARY_DIR}/modules/3rd/slang-rhi")
-
-add_custom_command(TARGET 24_sponza_graph POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}/D3D12"
-)
-foreach(_dll
-    slang.dll slang-compiler.dll slang-glslang.dll slang-llvm.dll slang-rt.dll
-    dxcompiler.dll dxil.dll WinPixEventRuntime.dll dawn.dll
-)
-    add_custom_command(TARGET 24_sponza_graph POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_rhi_dir}/${_dll}" "${_out_dir}/${_dll}"
-    )
-endforeach()
-foreach(_dll D3D12/D3D12Core.dll D3D12/d3d12SDKLayers.dll)
-    add_custom_command(TARGET 24_sponza_graph POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_rhi_dir}/${_dll}" "${_out_dir}/${_dll}"
-    )
-endforeach()
-add_custom_command(TARGET 24_sponza_graph POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3-shared>" "${_out_dir}/"
-)
 foreach(_shader shadow.slang gbuffer.slang forward.slang ssgi.slang light_cull.slang)
     add_custom_command(TARGET 24_sponza_graph POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

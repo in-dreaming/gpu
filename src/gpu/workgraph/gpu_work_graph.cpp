@@ -14,16 +14,10 @@
 
 extern rhi::IComputePipeline* gpuResolveComputePipeline(GpuDevice device, GpuPipelineHandle pipeline);
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
-#ifdef _MSC_VER
-#pragma warning(disable : 4996)
-#endif
+static bool writeWorkGraphShaderToTempFile(const char* content, const char* suffix, std::string& outPath) {
+    std::string fileName = std::string("gpu_wg_") + suffix + ".slang";
+    return gpuWriteTextTempFile(fileName.c_str(), content, outPath);
+}
 
 struct WorkGraphBackendData {
     GpuPipelineHandle computePipeline;
@@ -37,17 +31,6 @@ struct WorkGraphBackendData {
 static std::map<uint64_t, WorkGraphBackendData> s_graphData;
 static std::mutex s_graphMutex;
 static uint64_t s_nextGraphId = 1;
-
-static bool writeWorkGraphShaderToTempFile(const char* content, const char* suffix, std::string& outPath) {
-    char tempDir[MAX_PATH];
-    GetTempPathA(MAX_PATH, tempDir);
-    outPath = std::string(tempDir) + "gpu_wg_" + suffix + ".slang";
-    FILE* f = fopen(outPath.c_str(), "w");
-    if (!f) return false;
-    fputs(content, f);
-    fclose(f);
-    return true;
-}
 
 GpuResult gpuCreateWorkGraph(GpuDevice device, const GpuWorkGraphDesc* desc, GpuWorkGraph* outGraph)
 {

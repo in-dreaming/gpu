@@ -7,13 +7,6 @@
 #include <slang.h>
 #include <vector>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
 #ifdef _MSC_VER
 #pragma warning(disable : 4996)
 #endif
@@ -148,19 +141,18 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
         std::string vsSrc((const char*)desc->vertexShader.data, (size_t)desc->vertexShader.size);
         std::string fsSrc((const char*)desc->fragmentShader.data, (size_t)desc->fragmentShader.size);
 
-        char tempDir[MAX_PATH];
-        GetTempPathA(MAX_PATH, tempDir);
-        std::string vsPath = std::string(tempDir) + "gpu_vs.slang";
-        std::string fsPath = std::string(tempDir) + "gpu_fs.slang";
+        std::string vsPath;
+        std::string fsPath;
+        if (!gpuWriteTextTempFile("gpu_vs.slang", vsSrc.c_str(), vsPath) ||
+            !gpuWriteTextTempFile("gpu_fs.slang", fsSrc.c_str(), fsPath)) {
+            return GPU_ERROR_INTERNAL;
+        }
 
         std::vector<rhi::ComPtr<slang::IModule>> modules;
         std::vector<rhi::ComPtr<slang::IEntryPoint>> entryPoints;
         std::vector<slang::IComponentType*> componentTypes;
 
         if (hasVertexShader) {
-            FILE* f = fopen(vsPath.c_str(), "w");
-            if (f) { fputs(vsSrc.c_str(), f); fclose(f); }
-
             rhi::ComPtr<slang::IModule> vsModule;
             slang::IBlob* vsDiag = nullptr;
             vsModule = slangSession->loadModule(vsPath.c_str(), &vsDiag);
@@ -177,9 +169,6 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
         }
 
         if (hasFragmentShader) {
-            FILE* f = fopen(fsPath.c_str(), "w");
-            if (f) { fputs(fsSrc.c_str(), f); fclose(f); }
-
             rhi::ComPtr<slang::IModule> fsModule;
             slang::IBlob* fsDiag = nullptr;
             fsModule = slangSession->loadModule(fsPath.c_str(), &fsDiag);
@@ -293,12 +282,10 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
     if (desc->computeShader.data && desc->computeShader.size > 0) {
         std::string csSrc((const char*)desc->computeShader.data, (size_t)desc->computeShader.size);
 
-        char tempDir[MAX_PATH];
-        GetTempPathA(MAX_PATH, tempDir);
-        std::string csPath = std::string(tempDir) + "gpu_cs.slang";
-
-        FILE* f = fopen(csPath.c_str(), "w");
-        if (f) { fputs(csSrc.c_str(), f); fclose(f); }
+        std::string csPath;
+        if (!gpuWriteTextTempFile("gpu_cs.slang", csSrc.c_str(), csPath)) {
+            return GPU_ERROR_INTERNAL;
+        }
 
         slang::IBlob* csDiag = nullptr;
         csModule = slangSession->loadModule(csPath.c_str(), &csDiag);

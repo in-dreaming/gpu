@@ -11,13 +11,6 @@
 #include <vector>
 #include <map>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
 #ifdef _MSC_VER
 #pragma warning(disable : 4996)
 #endif
@@ -201,14 +194,11 @@ static GpuResult loadModuleFromBinary(
 
     std::string src((const char*)binary.data, (size_t)binary.size);
 
-    char tempDir[MAX_PATH];
-    GetTempPathA(MAX_PATH, tempDir);
-    std::string path = std::string(tempDir) + "gpu_rt_" + tempSuffix + ".slang";
-
-    FILE* f = fopen(path.c_str(), "w");
-    if (!f) return GPU_ERROR_INTERNAL;
-    fputs(src.c_str(), f);
-    fclose(f);
+    std::string path;
+    std::string fileName = std::string("gpu_rt_") + tempSuffix + ".slang";
+    if (!gpuWriteTextTempFile(fileName.c_str(), src.c_str(), path)) {
+        return GPU_ERROR_INTERNAL;
+    }
 
     slang::IBlob* diagBlob = nullptr;
     outModule = slangSession->loadModule(path.c_str(), &diagBlob);

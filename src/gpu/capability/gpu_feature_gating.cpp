@@ -1,5 +1,6 @@
 #include "gpu/capability/gpu_feature_gating.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/core/gpu_strutil.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +34,7 @@ GpuResult gpuBuildFeatureTable(GpuDevice device, GpuFeatureTable* outTable)
     outTable->supported[GPU_FEATURE_BINDLESS] = nativeBindless
         ? GPU_FEATURE_SUPPORT_NATIVE : GPU_FEATURE_SUPPORT_UNSUPPORTED;
     outTable->limits[GPU_FEATURE_BINDLESS] = nativeBindless ? 1000000 : 0;
-    if (!nativeBindless) { strncpy_s(outTable->reasons[GPU_FEATURE_BINDLESS], 128, s_unsupportedReasons[GPU_FEATURE_BINDLESS], 127); }
+    if (!nativeBindless) { gpuStrncpy(outTable->reasons[GPU_FEATURE_BINDLESS], 128, s_unsupportedReasons[GPU_FEATURE_BINDLESS], 127); }
 
     bool nativeMesh = device->rhiDevice->hasFeature(rhi::Feature::MeshShader);
     outTable->supported[GPU_FEATURE_MESH_SHADER] = nativeMesh

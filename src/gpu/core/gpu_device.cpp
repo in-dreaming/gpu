@@ -129,15 +129,6 @@ void gpuDestroyDevice(GpuDevice device)
         if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
     }
 
-    gpuQueueWaitOnHost((GpuCommandQueue)device->graphicsQueue.get());
-    if (!device->computeQueueIsAlias && device->computeQueue) {
-        gpuQueueWaitOnHost((GpuCommandQueue)device->computeQueue.get());
-    }
-    if (!device->transferQueueIsAlias && device->transferQueue &&
-        device->transferQueue.get() != device->computeQueue.get()) {
-        gpuQueueWaitOnHost((GpuCommandQueue)device->transferQueue.get());
-    }
-
     for (uint32_t i = 1; i < poolCap; i++) {
         auto& slot = device->textureViewPool.slots[i];
         if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
@@ -151,7 +142,6 @@ void gpuDestroyDevice(GpuDevice device)
         if (slot.alive && slot.ptr) { slot.ptr->release(); slot.ptr = nullptr; slot.alive = false; }
     }
 
-    device->graphicsQueue = nullptr;
     for (auto& entry : device->pooledTransientTextures) {
         if (entry.rtView.index != 0) gpuDestroyTextureView(device, entry.rtView);
         if (entry.texture.index != 0) gpuDestroyTexture(device, entry.texture);
@@ -161,6 +151,10 @@ void gpuDestroyDevice(GpuDevice device)
         if (entry.buffer.index != 0) gpuDestroyBuffer(device, entry.buffer);
     }
     device->pooledTransientBuffers.clear();
+
+    device->graphicsQueue = nullptr;
+    device->computeQueue = nullptr;
+    device->transferQueue = nullptr;
     device->rhiDevice = nullptr;
     delete device;
 }
