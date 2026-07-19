@@ -1127,6 +1127,14 @@ int main(void)
         GpuGraph graph;
         CHECK(gpuGraphCreate(device, &graph));
         gpuGraphSetExecuteMode(graph, GPU_GRAPH_EXECUTE_MULTI_QUEUE);
+        GpuTextureDesc colorDesc = {
+            .type = GPU_TEXTURE_TYPE_2D, .width = 16, .height = 16,
+            .depth = 1, .arrayLength = 1, .mipCount = 1,
+            .format = GPU_FORMAT_RGBA8_UNORM, .sampleCount = 1,
+            .usage = GPU_TEXTURE_USAGE_RENDER_TARGET,
+            .label = "async_color"
+        };
+        GpuGraphResource color = gpuGraphCreateTexture(graph, &colorDesc, "async_color");
         GpuBufferDesc bdesc = {
             .size = 256, .elementSize = 4,
             .usage = GPU_BUFFER_USAGE_UNORDERED_ACCESS | GPU_BUFFER_USAGE_SHADER_RESOURCE,
@@ -1134,6 +1142,11 @@ int main(void)
         };
         GpuGraphResource buf = gpuGraphCreateBuffer(graph, &bdesc, "async_buf");
         GpuGraphPass rp = gpuGraphAddRenderPass(graph, "noop_render");
+        GpuGraphColorAttachment colorAttachment = {
+            .resource = color, .loadOp = GPU_LOAD_OP_CLEAR, .storeOp = GPU_STORE_OP_STORE,
+            .clearColor = { 0.0f, 0.0f, 0.0f, 1.0f }
+        };
+        gpuGraphPassSetColorAttachments(rp, 1, &colorAttachment);
         gpuGraphPassSetCallback(rp, noop_pass_callback, NULL);
         GpuGraphPass cp = gpuGraphAddComputePass(graph, "async_compute");
         gpuGraphPassReadWrite(cp, buf);

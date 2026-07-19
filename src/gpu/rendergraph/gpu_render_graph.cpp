@@ -1311,12 +1311,6 @@ static GpuResult executeMultiQueue(GpuGraph graph)
 
     if (segments.empty()) return GPU_SUCCESS;
 
-    GpuFence fence = nullptr;
-    const bool needFence = segments.size() > 1;
-    if (needFence) {
-        if (gpuCreateFence(graph->device, 0, &fence) != GPU_SUCCESS) return GPU_ERROR_INTERNAL;
-    }
-
     uint32_t profileQueryIndex = 0;
     for (size_t si = 0; si < segments.size(); si++) {
         auto& seg = segments[si];
@@ -1338,29 +1332,12 @@ static GpuResult executeMultiQueue(GpuGraph graph)
         GpuCommandBuffer cmd = gpuFinishCommandEncoder(encoder);
         if (!cmd) return GPU_ERROR_INTERNAL;
 
-        GpuSemaphore signalSem = {};
-        const GpuSemaphore* signalPtr = nullptr;
-        if (needFence && si + 1 < segments.size()) {
-            signalSem.fence = fence;
-            signalSem.value = (uint64_t)(si + 1);
-            signalPtr = &signalSem;
-        }
-
-        GpuResult submitRes = gpuQueueSubmitWithSync(queue, 0, nullptr, 1, &cmd, signalPtr);
-        if (submitRes != GPU_SUCCESS) {
-            if (fence) gpuDestroyFence(graph->device, fence);
-            return GPU_ERROR_INTERNAL;
-        }
-
-        if (needFence && si + 1 < segments.size()) {
-            if (gpuFenceWait(graph->device, fence, (uint64_t)(si + 1), UINT32_MAX) != GPU_SUCCESS) {
-                if (fence) gpuDestroyFence(graph->device, fence);
-                return GPU_ERROR_INTERNAL;
-            }
-        }
+        // Keep segment ordering and graph-owned resources valid until GPU-side
+        // cross-queue dependencies replace this host-synchronized path.
+        if (gpuQueueSubmit(queue, 1, &cmd) != GPU_SUCCESS) return GPU_ERROR_INTERNAL;
+        if (gpuQueueWaitOnHost(queue) != GPU_SUCCESS) return GPU_ERROR_INTERNAL;
     }
 
-    if (fence) gpuDestroyFence(graph->device, fence);
     return GPU_SUCCESS;
 }
 
