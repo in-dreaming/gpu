@@ -4,6 +4,8 @@
 #include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_backend.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/pipeline/gpu_pipeline_state.h"
+#include <slang-rhi/shader-cursor.h>
 #include <vector>
 #include <cstdlib>
 
@@ -478,6 +480,63 @@ void gpuCmdSetVertexBuffer(GpuRenderPassEncoder pass, uint32_t slot, GpuBufferHa
     pass->rhiPassEncoder->setRenderState(state);
 }
 
+extern rhi::IRenderPipeline* gpuResolveRenderPipeline(GpuDevice device, GpuPipelineHandle pipeline);
+
+GpuResult gpuCmdBindGraphicsPipeline(GpuRenderPassEncoder pass, GpuPipelineHandle pipeline)
+{
+    if (!pass || !gpuHandleIsValid(pipeline)) return GPU_ERROR_INVALID_ARGS;
+    rhi::IRenderPipeline* resolved = gpuResolveRenderPipeline(pass->device, pipeline);
+    if (!resolved) return GPU_ERROR_INVALID_ARGS;
+    pass->rootShaderObject = pass->rhiPassEncoder->bindPipeline(resolved);
+    return pass->rootShaderObject ? GPU_SUCCESS : GPU_ERROR_INTERNAL;
+}
+
+GpuResult gpuCmdSetIndexBuffer(GpuRenderPassEncoder pass, GpuBufferHandle buffer, uint64_t offset, uint8_t index32)
+{
+    if (!pass || !gpuHandleIsValid(buffer)) return GPU_ERROR_INVALID_ARGS;
+    rhi::IBuffer* resolved = pass->device->bufferPool.resolve(buffer.index, buffer.generation);
+    if (!resolved) return GPU_ERROR_INVALID_ARGS;
+    rhi::RenderState state = {};
+    state.indexBuffer = rhi::BufferOffsetPair(resolved, offset);
+    state.indexFormat = index32 ? rhi::IndexFormat::Uint32 : rhi::IndexFormat::Uint16;
+    pass->rhiPassEncoder->setRenderState(state);
+    return GPU_SUCCESS;
+}
+
+static rhi::ShaderCursor bindingCursor(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding)
+{
+    if (!pass || !pass->rootShaderObject) return {};
+    rhi::ShaderCursor cursor(pass->rootShaderObject);
+    rhi::ShaderCursor group = cursor[set];
+    return group.isValid() ? group[binding] : rhi::ShaderCursor{};
+}
+
+GpuResult gpuCmdSetBindingData(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, const void* data, size_t size)
+{
+    if (!data || size == 0) return GPU_ERROR_INVALID_ARGS;
+    rhi::ShaderCursor cursor = bindingCursor(pass, set, binding);
+    if (!cursor.isValid()) return GPU_ERROR_INVALID_ARGS;
+    return SLANG_SUCCEEDED(cursor.setData(data, size)) ? GPU_SUCCESS : GPU_ERROR_INTERNAL;
+}
+
+GpuResult gpuCmdSetBindingTexture(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, GpuTextureHandle texture)
+{
+    if (!pass || !gpuHandleIsValid(texture)) return GPU_ERROR_INVALID_ARGS;
+    rhi::ITexture* resolved = pass->device->texturePool.resolve(texture.index, texture.generation);
+    rhi::ShaderCursor cursor = bindingCursor(pass, set, binding);
+    if (!resolved || !cursor.isValid()) return GPU_ERROR_INVALID_ARGS;
+    return SLANG_SUCCEEDED(cursor.setBinding(rhi::Binding(resolved))) ? GPU_SUCCESS : GPU_ERROR_INTERNAL;
+}
+
+GpuResult gpuCmdSetBindingSampler(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, GpuHandle sampler)
+{
+    if (!pass || !gpuHandleIsValid(sampler)) return GPU_ERROR_INVALID_ARGS;
+    rhi::ISampler* resolved = pass->device->samplerPool.resolve(sampler.index, sampler.generation);
+    rhi::ShaderCursor cursor = bindingCursor(pass, set, binding);
+    if (!resolved || !cursor.isValid()) return GPU_ERROR_INVALID_ARGS;
+    return SLANG_SUCCEEDED(cursor.setBinding(rhi::Binding(resolved))) ? GPU_SUCCESS : GPU_ERROR_INTERNAL;
+}
+
 void gpuCmdDraw(GpuRenderPassEncoder pass, uint32_t vertexCount, uint32_t instanceCount,
                 uint32_t startVertex, uint32_t startInstance)
 {
@@ -488,6 +547,19 @@ void gpuCmdDraw(GpuRenderPassEncoder pass, uint32_t vertexCount, uint32_t instan
     args.startVertexLocation = startVertex;
     args.startInstanceLocation = startInstance;
     pass->rhiPassEncoder->draw(args);
+}
+
+void gpuCmdDrawIndexed(GpuRenderPassEncoder pass, uint32_t indexCount, uint32_t instanceCount,
+                       uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance)
+{
+    if (!pass) return;
+    rhi::DrawArguments args = {};
+    args.vertexCount = indexCount;
+    args.instanceCount = instanceCount;
+    args.startIndexLocation = firstIndex;
+    args.startVertexLocation = vertexOffset;
+    args.startInstanceLocation = firstInstance;
+    pass->rhiPassEncoder->drawIndexed(args);
 }
 
 GpuComputePassEncoder gpuCmdBeginComputePass(GpuCommandEncoder encoder)

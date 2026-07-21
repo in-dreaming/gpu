@@ -90,8 +90,15 @@ typedef struct GpuRenderPipeline_t* GpuRenderPipeline;
 void gpuCmdBindRenderPipeline(GpuRenderPassEncoder pass, GpuRenderPipeline pipeline);
 void gpuCmdSetViewport(GpuRenderPassEncoder pass, float x, float y, float width, float height);
 void gpuCmdSetVertexBuffer(GpuRenderPassEncoder pass, uint32_t slot, GpuBufferHandle buffer, uint64_t offset);
+GpuResult gpuCmdBindGraphicsPipeline(GpuRenderPassEncoder pass, GpuPipelineHandle pipeline);
+GpuResult gpuCmdSetIndexBuffer(GpuRenderPassEncoder pass, GpuBufferHandle buffer, uint64_t offset, uint8_t index32);
+GpuResult gpuCmdSetBindingData(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, const void* data, size_t size);
+GpuResult gpuCmdSetBindingTexture(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, GpuTextureHandle texture);
+GpuResult gpuCmdSetBindingSampler(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, GpuHandle sampler);
 void gpuCmdDraw(GpuRenderPassEncoder pass, uint32_t vertexCount, uint32_t instanceCount,
                 uint32_t startVertex, uint32_t startInstance);
+void gpuCmdDrawIndexed(GpuRenderPassEncoder pass, uint32_t indexCount, uint32_t instanceCount,
+                       uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance);
 
 typedef struct GpuComputePipeline_t* GpuComputePipeline;
 typedef struct GpuComputePassEncoder_t* GpuComputePassEncoder;
