@@ -32,6 +32,13 @@ typedef struct {
 typedef struct {
     const uint8_t* data;
     uint64_t size;
+    // Optional serialized Slang module IR containing reflection/layout for
+    // precompiled backend bytecode. When present, pipeline creation never
+    // treats data as source or invokes a downstream compiler.
+    const uint8_t* moduleData;
+    uint64_t moduleSize;
+    const char* moduleName;
+    const char* entryPoint;
 } GpuShaderBinary;
 
 typedef struct GpuShaderProgram_t* GpuShaderProgram;

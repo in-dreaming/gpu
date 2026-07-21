@@ -5,6 +5,7 @@
 #include <string.h>
 #include <slang-rhi.h>
 #include <slang.h>
+#include <string>
 #include <vector>
 
 #ifdef _MSC_VER
@@ -131,6 +132,8 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
 
     bool hasVertexShader = desc->vertexShader.data && desc->vertexShader.size > 0;
     bool hasFragmentShader = desc->fragmentShader.data && desc->fragmentShader.size > 0;
+    bool hasPrecompiledVertex = hasVertexShader && desc->vertexShader.moduleData && desc->vertexShader.moduleSize > 0;
+    bool hasPrecompiledFragment = hasFragmentShader && desc->fragmentShader.moduleData && desc->fragmentShader.moduleSize > 0;
 
     if (hasVertexShader || hasFragmentShader) {
         rhi::ComPtr<slang::ISession> slangSession;
@@ -138,6 +141,76 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
             return GPU_ERROR_INTERNAL;
         }
 
+        if ((hasPrecompiledVertex || hasPrecompiledFragment) &&
+            (hasVertexShader != hasPrecompiledVertex || hasFragmentShader != hasPrecompiledFragment)) {
+            return GPU_ERROR_INVALID_PARAMETER;
+        }
+
+        if (hasPrecompiledVertex || hasPrecompiledFragment) {
+            std::vector<rhi::ComPtr<slang::IModule>> modules;
+            std::vector<const GpuShaderBinary*> moduleBinaries;
+            std::vector<std::string> moduleNames;
+            std::vector<rhi::ComPtr<slang::IEntryPoint>> entryPoints;
+            std::vector<slang::IComponentType*> moduleComponents;
+            std::vector<rhi::ShaderEntryPointCode> precompiledCode;
+
+            auto loadPrecompiled = [&](const GpuShaderBinary& shader, const char* moduleName,
+                                       const char* defaultEntry) -> bool {
+                const char* serializedName = shader.moduleName ? shader.moduleName : moduleName;
+                rhi::ComPtr<slang::IModule> module;
+                for (size_t i = 0; i < moduleNames.size(); ++i) {
+                    if (moduleNames[i] != serializedName) continue;
+                    const GpuShaderBinary& existing = *moduleBinaries[i];
+                    if (existing.moduleSize != shader.moduleSize ||
+                        memcmp(existing.moduleData, shader.moduleData, (size_t)shader.moduleSize) != 0)
+                        return false;
+                    module = modules[i];
+                    break;
+                }
+                if (!module) {
+                    rhi::ComPtr<ISlangBlob> moduleBlob(slang_createBlob(shader.moduleData, (size_t)shader.moduleSize));
+                    if (!moduleBlob) return false;
+                    rhi::ComPtr<ISlangBlob> diagnostics;
+                    module = slangSession->loadModuleFromIRBlob(
+                        serializedName, serializedName, moduleBlob, diagnostics.writeRef());
+                    if (!module) return false;
+                    moduleComponents.push_back(module.get());
+                    modules.push_back(module);
+                    moduleBinaries.push_back(&shader);
+                    moduleNames.emplace_back(serializedName);
+                }
+                rhi::ComPtr<slang::IEntryPoint> entryPoint;
+                const char* entryName = shader.entryPoint ? shader.entryPoint : defaultEntry;
+                if (SLANG_FAILED(module->findEntryPointByName(entryName, entryPoint.writeRef()))) return false;
+                entryPoints.push_back(entryPoint);
+                precompiledCode.push_back({shader.data, (size_t)shader.size});
+                return true;
+            };
+
+            if (hasPrecompiledVertex && !loadPrecompiled(desc->vertexShader, "gpu_precompiled_vs", "vertexMain"))
+                return GPU_ERROR_INVALID_PARAMETER;
+            if (hasPrecompiledFragment && !loadPrecompiled(desc->fragmentShader, "gpu_precompiled_fs", "fragmentMain"))
+                return GPU_ERROR_INVALID_PARAMETER;
+
+            rhi::ComPtr<slang::IComponentType> globalScope;
+            rhi::ComPtr<slang::IBlob> linkDiagnostics;
+            if (SLANG_FAILED(slangSession->createCompositeComponentType(
+                    moduleComponents.data(), (uint32_t)moduleComponents.size(),
+                    globalScope.writeRef(), linkDiagnostics.writeRef()))) {
+                return GPU_ERROR_INVALID_PARAMETER;
+            }
+
+            std::vector<slang::IComponentType*> rawEntries;
+            for (auto& entry : entryPoints) rawEntries.push_back(entry.get());
+            rhi::ShaderProgramDesc programDesc = {};
+            programDesc.slangGlobalScope = globalScope.get();
+            programDesc.slangEntryPoints = rawEntries.data();
+            programDesc.slangEntryPointCount = (uint32_t)rawEntries.size();
+            programDesc.precompiledEntryPointCode = precompiledCode.data();
+            programDesc.precompiledEntryPointCodeCount = (uint32_t)precompiledCode.size();
+            if (SLANG_FAILED(device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef())))
+                return GPU_ERROR_INVALID_PARAMETER;
+        } else {
         std::string vsSrc((const char*)desc->vertexShader.data, (size_t)desc->vertexShader.size);
         std::string fsSrc((const char*)desc->fragmentShader.data, (size_t)desc->fragmentShader.size);
 
@@ -206,6 +279,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
 
                 device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef());
             }
+        }
         }
     }
 
