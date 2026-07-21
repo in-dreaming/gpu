@@ -36,6 +36,8 @@ GpuResult gpuGetQueueInfo(GpuDevice device, GpuQueueType type, GpuQueueInfo* out
 
 GpuCommandEncoder gpuBeginCommandEncoder(GpuDevice device, GpuCommandQueue queue);
 GpuCommandBuffer gpuFinishCommandEncoder(GpuCommandEncoder encoder);
+void gpuCancelCommandEncoder(GpuCommandEncoder encoder);
+void gpuDestroyCommandBuffer(GpuCommandBuffer commands);
 
 GpuResult gpuQueueSubmit(GpuCommandQueue queue, uint32_t count, GpuCommandBuffer* cmdBuffers);
 GpuResult gpuQueueWaitOnHost(GpuCommandQueue queue);

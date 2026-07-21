@@ -339,6 +339,18 @@ GpuCommandBuffer gpuFinishCommandEncoder(GpuCommandEncoder encoder)
     return buf;
 }
 
+void gpuCancelCommandEncoder(GpuCommandEncoder encoder)
+{
+    if (!encoder) return;
+    delete encoder;
+}
+
+void gpuDestroyCommandBuffer(GpuCommandBuffer commands)
+{
+    if (!commands) return;
+    delete commands;
+}
+
 GpuResult gpuQueueSubmit(GpuCommandQueue queue, uint32_t count, GpuCommandBuffer* cmdBuffers)
 {
     if (!queue || !cmdBuffers) return GPU_ERROR_INVALID_ARGS;
