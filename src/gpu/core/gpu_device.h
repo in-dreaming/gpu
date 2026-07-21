@@ -17,6 +17,7 @@ typedef struct {
 } GpuDeviceDesc;
 
 GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice);
+const char* gpuGetDeviceLastDiagnostic(GpuDevice device);
 void gpuDestroyDevice(GpuDevice device);
 
 #ifdef __cplusplus

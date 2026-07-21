@@ -96,6 +96,11 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
     return GPU_SUCCESS;
 }
 
+const char* gpuGetDeviceLastDiagnostic(GpuDevice device)
+{
+    return device ? device->lastError.c_str() : "invalid GPU device";
+}
+
 void gpuDestroyDevice(GpuDevice device)
 {
     if (!device) return;
@@ -526,8 +531,15 @@ static rhi::ShaderCursor bindingCursor(GpuRenderPassEncoder pass, uint32_t set, 
 {
     if (!pass || !pass->rootShaderObject) return {};
     rhi::ShaderCursor cursor(pass->rootShaderObject);
-    rhi::ShaderCursor group = cursor[set];
-    return group.isValid() ? group[binding] : rhi::ShaderCursor{};
+    slang::TypeLayoutReflection* layout = cursor.getTypeLayout();
+    if (!layout || layout->getKind() != slang::TypeReflection::Kind::Struct) return {};
+    const SlangInt count = layout->getFieldCount();
+    for (SlangInt index = 0; index < count; ++index) {
+        slang::VariableLayoutReflection* field = layout->getFieldByIndex((unsigned int)index);
+        if (field && field->getBindingSpace() == set && field->getBindingIndex() == binding)
+            return cursor[(uint32_t)index];
+    }
+    return {};
 }
 
 GpuResult gpuCmdSetBindingData(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, const void* data, size_t size)

@@ -127,6 +127,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     if (!device || !desc || !outPipeline) {
         return GPU_ERROR_INVALID_PARAMETER;
     }
+    device->lastError.clear();
 
     rhi::ComPtr<rhi::IShaderProgram> rhiProgram;
 
@@ -138,11 +139,13 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     if (hasVertexShader || hasFragmentShader) {
         rhi::ComPtr<slang::ISession> slangSession;
         if (SLANG_FAILED(device->rhiDevice->getSlangSession(slangSession.writeRef()))) {
+            device->lastError = "graphics pipeline could not get Slang session";
             return GPU_ERROR_INTERNAL;
         }
 
         if ((hasPrecompiledVertex || hasPrecompiledFragment) &&
             (hasVertexShader != hasPrecompiledVertex || hasFragmentShader != hasPrecompiledFragment)) {
+            device->lastError = "graphics pipeline mixes precompiled and source stages";
             return GPU_ERROR_INVALID_PARAMETER;
         }
 
@@ -173,7 +176,12 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
                     rhi::ComPtr<ISlangBlob> diagnostics;
                     module = slangSession->loadModuleFromIRBlob(
                         serializedName, serializedName, moduleBlob, diagnostics.writeRef());
-                    if (!module) return false;
+                    if (!module) {
+                        if (diagnostics && diagnostics->getBufferPointer())
+                            device->lastError.assign((const char*)diagnostics->getBufferPointer(), diagnostics->getBufferSize());
+                        else device->lastError = "Slang rejected serialized module IR";
+                        return false;
+                    }
                     moduleComponents.push_back(module.get());
                     modules.push_back(module);
                     moduleBinaries.push_back(&shader);
@@ -181,22 +189,30 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
                 }
                 rhi::ComPtr<slang::IEntryPoint> entryPoint;
                 const char* entryName = shader.entryPoint ? shader.entryPoint : defaultEntry;
-                if (SLANG_FAILED(module->findEntryPointByName(entryName, entryPoint.writeRef()))) return false;
+                if (SLANG_FAILED(module->findEntryPointByName(entryName, entryPoint.writeRef()))) {
+                    device->lastError = std::string("serialized module has no entry point: ") + entryName;
+                    return false;
+                }
                 entryPoints.push_back(entryPoint);
                 precompiledCode.push_back({shader.data, (size_t)shader.size});
                 return true;
             };
 
-            if (hasPrecompiledVertex && !loadPrecompiled(desc->vertexShader, "gpu_precompiled_vs", "vertexMain"))
+            if (hasPrecompiledVertex && !loadPrecompiled(desc->vertexShader, "gpu_precompiled_vs", "vertexMain")) {
+                if (device->lastError.empty()) device->lastError = "graphics pipeline could not load precompiled vertex module/entry";
                 return GPU_ERROR_INVALID_PARAMETER;
-            if (hasPrecompiledFragment && !loadPrecompiled(desc->fragmentShader, "gpu_precompiled_fs", "fragmentMain"))
+            }
+            if (hasPrecompiledFragment && !loadPrecompiled(desc->fragmentShader, "gpu_precompiled_fs", "fragmentMain")) {
+                if (device->lastError.empty()) device->lastError = "graphics pipeline could not load precompiled fragment module/entry";
                 return GPU_ERROR_INVALID_PARAMETER;
+            }
 
             rhi::ComPtr<slang::IComponentType> globalScope;
             rhi::ComPtr<slang::IBlob> linkDiagnostics;
             if (SLANG_FAILED(slangSession->createCompositeComponentType(
                     moduleComponents.data(), (uint32_t)moduleComponents.size(),
                     globalScope.writeRef(), linkDiagnostics.writeRef()))) {
+                device->lastError = "graphics pipeline could not compose precompiled modules";
                 return GPU_ERROR_INVALID_PARAMETER;
             }
 
@@ -208,8 +224,10 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
             programDesc.slangEntryPointCount = (uint32_t)rawEntries.size();
             programDesc.precompiledEntryPointCode = precompiledCode.data();
             programDesc.precompiledEntryPointCodeCount = (uint32_t)precompiledCode.size();
-            if (SLANG_FAILED(device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef())))
+            if (SLANG_FAILED(device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef()))) {
+                device->lastError = "graphics pipeline could not create precompiled shader program";
                 return GPU_ERROR_INVALID_PARAMETER;
+            }
         } else {
         std::string vsSrc((const char*)desc->vertexShader.data, (size_t)desc->vertexShader.size);
         std::string fsSrc((const char*)desc->fragmentShader.data, (size_t)desc->fragmentShader.size);
@@ -292,20 +310,27 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     std::vector<rhi::InputElementDesc> inputElements;
     std::vector<rhi::VertexStreamDesc> vertexStreams;
     if (desc->vertexAttributeCount > 0) {
-        if (!desc->vertexAttributes || !desc->vertexBindings || desc->vertexBindingCount == 0)
+        if (!desc->vertexAttributes || !desc->vertexBindings || desc->vertexBindingCount == 0) {
+            device->lastError = "graphics pipeline vertex layout is incomplete";
             return GPU_ERROR_INVALID_PARAMETER;
+        }
         inputElements.reserve(desc->vertexAttributeCount);
         for (uint32_t i = 0; i < desc->vertexAttributeCount; ++i) {
             const GpuVertexAttributeDesc& source = desc->vertexAttributes[i];
-            if (!source.semanticName || source.binding >= desc->vertexBindingCount)
+            if (!source.semanticName || source.binding >= desc->vertexBindingCount) {
+                device->lastError = "graphics pipeline vertex attribute is invalid";
                 return GPU_ERROR_INVALID_PARAMETER;
+            }
             inputElements.push_back({source.semanticName, source.semanticIndex, convertVertexFormat(source.format),
                                      source.offset, source.binding});
         }
         vertexStreams.reserve(desc->vertexBindingCount);
         for (uint32_t i = 0; i < desc->vertexBindingCount; ++i) {
             const GpuVertexBindingDesc& source = desc->vertexBindings[i];
-            if (source.binding != i || source.stride == 0) return GPU_ERROR_INVALID_PARAMETER;
+            if (source.binding != i || source.stride == 0) {
+                device->lastError = "graphics pipeline vertex stream is invalid";
+                return GPU_ERROR_INVALID_PARAMETER;
+            }
             vertexStreams.push_back({source.stride,
                 source.inputRatePerInstance ? rhi::InputSlotClass::PerInstance : rhi::InputSlotClass::PerVertex,
                 source.inputRatePerInstance ? 1u : 0u});
@@ -313,8 +338,10 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
         rhi::InputLayoutDesc inputDesc = {};
         inputDesc.inputElements = inputElements.data(); inputDesc.inputElementCount = (uint32_t)inputElements.size();
         inputDesc.vertexStreams = vertexStreams.data(); inputDesc.vertexStreamCount = (uint32_t)vertexStreams.size();
-        if (SLANG_FAILED(device->rhiDevice->createInputLayout(inputDesc, inputLayout.writeRef())))
+        if (SLANG_FAILED(device->rhiDevice->createInputLayout(inputDesc, inputLayout.writeRef()))) {
+            device->lastError = "graphics pipeline input layout creation failed";
             return GPU_ERROR_INVALID_PARAMETER;
+        }
         rhiDesc.inputLayout = inputLayout;
     }
 
@@ -354,6 +381,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     rhi::Result r = device->rhiDevice->createRenderPipeline(rhiDesc, rhiPipeline.writeRef());
 
     if (SLANG_FAILED(r)) {
+        device->lastError = "graphics render pipeline creation failed";
         return GPU_ERROR_UNKNOWN;
     }
 
