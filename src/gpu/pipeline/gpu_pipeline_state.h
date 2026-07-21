@@ -92,6 +92,8 @@ typedef enum {
 
 // Vertex input description
 typedef struct {
+    const char* semanticName;
+    uint32_t semanticIndex;
     uint32_t location;
     uint32_t binding;
     GpuFormat format;

@@ -288,6 +288,36 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     rhiDesc.primitiveTopology = convertTopology(desc->primitiveTopology);
     rhiDesc.label = desc->label;
 
+    rhi::ComPtr<rhi::IInputLayout> inputLayout;
+    std::vector<rhi::InputElementDesc> inputElements;
+    std::vector<rhi::VertexStreamDesc> vertexStreams;
+    if (desc->vertexAttributeCount > 0) {
+        if (!desc->vertexAttributes || !desc->vertexBindings || desc->vertexBindingCount == 0)
+            return GPU_ERROR_INVALID_PARAMETER;
+        inputElements.reserve(desc->vertexAttributeCount);
+        for (uint32_t i = 0; i < desc->vertexAttributeCount; ++i) {
+            const GpuVertexAttributeDesc& source = desc->vertexAttributes[i];
+            if (!source.semanticName || source.binding >= desc->vertexBindingCount)
+                return GPU_ERROR_INVALID_PARAMETER;
+            inputElements.push_back({source.semanticName, source.semanticIndex, convertVertexFormat(source.format),
+                                     source.offset, source.binding});
+        }
+        vertexStreams.reserve(desc->vertexBindingCount);
+        for (uint32_t i = 0; i < desc->vertexBindingCount; ++i) {
+            const GpuVertexBindingDesc& source = desc->vertexBindings[i];
+            if (source.binding != i || source.stride == 0) return GPU_ERROR_INVALID_PARAMETER;
+            vertexStreams.push_back({source.stride,
+                source.inputRatePerInstance ? rhi::InputSlotClass::PerInstance : rhi::InputSlotClass::PerVertex,
+                source.inputRatePerInstance ? 1u : 0u});
+        }
+        rhi::InputLayoutDesc inputDesc = {};
+        inputDesc.inputElements = inputElements.data(); inputDesc.inputElementCount = (uint32_t)inputElements.size();
+        inputDesc.vertexStreams = vertexStreams.data(); inputDesc.vertexStreamCount = (uint32_t)vertexStreams.size();
+        if (SLANG_FAILED(device->rhiDevice->createInputLayout(inputDesc, inputLayout.writeRef())))
+            return GPU_ERROR_INVALID_PARAMETER;
+        rhiDesc.inputLayout = inputLayout;
+    }
+
     std::vector<rhi::ColorTargetDesc> targets;
     for (uint32_t i = 0; i < desc->colorTargetCount; i++) {
         rhi::ColorTargetDesc target = {};
