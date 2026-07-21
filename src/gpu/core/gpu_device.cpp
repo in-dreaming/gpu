@@ -5,7 +5,14 @@
 #include "gpu/core/gpu_backend.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/pipeline/gpu_pipeline_state.h"
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4267)
+#endif
 #include <slang-rhi/shader-cursor.h>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 #include <vector>
 #include <cstdlib>
 
