@@ -144,6 +144,10 @@ struct GpuRenderPassEncoder_t {
     rhi::ComPtr<rhi::IRenderPassEncoder> rhiPassEncoder;
     GpuDevice device;
     rhi::IShaderObject* rootShaderObject = nullptr;
+    // Slang RHI's setRenderState replaces the complete state. Keep one
+    // accumulated value so viewport, vertex and index updates cannot erase
+    // one another before a draw.
+    rhi::RenderState renderState = {};
 };
 
 struct GpuRenderPipeline_t {

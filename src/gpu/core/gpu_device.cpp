@@ -476,7 +476,7 @@ void gpuCmdBindRenderPipeline(GpuRenderPassEncoder pass, GpuRenderPipeline pipel
 void gpuCmdSetViewport(GpuRenderPassEncoder pass, float x, float y, float width, float height)
 {
     if (!pass) return;
-    rhi::RenderState state = {};
+    rhi::RenderState& state = pass->renderState;
     state.viewportCount = 1;
     state.viewports[0].originX = x;
     state.viewports[0].originY = y;
@@ -498,9 +498,9 @@ void gpuCmdSetVertexBuffer(GpuRenderPassEncoder pass, uint32_t slot, GpuBufferHa
     rhi::IBuffer* rhiBuf = pass->device->bufferPool.resolve(buffer.index, buffer.generation);
     if (!rhiBuf) return;
 
-    rhi::RenderState state = {};
+    rhi::RenderState& state = pass->renderState;
     state.vertexBuffers[slot] = rhi::BufferOffsetPair(rhiBuf, offset);
-    state.vertexBufferCount = slot + 1;
+    if (state.vertexBufferCount < slot + 1) state.vertexBufferCount = slot + 1;
     pass->rhiPassEncoder->setRenderState(state);
 }
 
@@ -520,7 +520,7 @@ GpuResult gpuCmdSetIndexBuffer(GpuRenderPassEncoder pass, GpuBufferHandle buffer
     if (!pass || !gpuHandleIsValid(buffer)) return GPU_ERROR_INVALID_ARGS;
     rhi::IBuffer* resolved = pass->device->bufferPool.resolve(buffer.index, buffer.generation);
     if (!resolved) return GPU_ERROR_INVALID_ARGS;
-    rhi::RenderState state = {};
+    rhi::RenderState& state = pass->renderState;
     state.indexBuffer = rhi::BufferOffsetPair(resolved, offset);
     state.indexFormat = index32 ? rhi::IndexFormat::Uint32 : rhi::IndexFormat::Uint16;
     pass->rhiPassEncoder->setRenderState(state);
