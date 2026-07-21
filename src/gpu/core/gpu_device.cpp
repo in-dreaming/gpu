@@ -547,6 +547,12 @@ GpuResult gpuCmdSetBindingData(GpuRenderPassEncoder pass, uint32_t set, uint32_t
     if (!data || size == 0) return GPU_ERROR_INVALID_ARGS;
     rhi::ShaderCursor cursor = bindingCursor(pass, set, binding);
     if (!cursor.isValid()) return GPU_ERROR_INVALID_ARGS;
+    slang::TypeLayoutReflection* type = cursor.getTypeLayout();
+    if (type && (type->getKind() == slang::TypeReflection::Kind::ConstantBuffer ||
+                 type->getKind() == slang::TypeReflection::Kind::ParameterBlock)) {
+        cursor = cursor.getDereferenced();
+        if (!cursor.isValid()) return GPU_ERROR_INTERNAL;
+    }
     return SLANG_SUCCEEDED(cursor.setData(data, size)) ? GPU_SUCCESS : GPU_ERROR_INTERNAL;
 }
 
