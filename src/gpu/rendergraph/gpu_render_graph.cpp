@@ -5,6 +5,7 @@
 #include "gpu/sync/gpu_fence.h"
 #include "gpu/resource/gpu_hazard.h"
 #include "gpu/resource/gpu_copy.h"
+#include "gpu/resource/gpu_readback.h"
 #include "gpu/resource/gpu_transient_heap.h"
 #include <vector>
 #include <string>
@@ -60,10 +61,29 @@ struct GpuGraphResourceRecord {
 };
 
 struct GpuCompiledCopyOp {
-    GpuBufferHandle src;
-    GpuBufferHandle dst;
+    enum Kind {
+        BufferToBuffer,
+        TextureToBuffer,
+    } kind;
+    GpuBufferHandle srcBuffer;
+    GpuBufferHandle dstBuffer;
+    rhi::ITexture* srcTexture;
+    uint32_t srcMip;
+    uint32_t srcArrayLayer;
+    uint64_t dstOffset;
+    uint32_t rowPitch;
+    uint32_t width;
+    uint32_t height;
+    uint32_t depth;
     uint64_t size;
-    bool valid;
+};
+
+struct GpuGraphTextureToBufferCopy {
+    GpuGraphResource source;
+    uint32_t sourceMip;
+    uint32_t sourceArrayLayer;
+    GpuGraphResource destination;
+    uint64_t destinationOffset;
 };
 
 struct GpuGraphPassAccess {
@@ -84,6 +104,7 @@ struct GpuGraphPass_t {
 
     GpuGraphPassCallback callback;
     void* userData;
+    std::vector<GpuGraphTextureToBufferCopy> textureToBufferCopies;
 
     bool culled;
     std::string culledReason;
@@ -129,7 +150,7 @@ struct GpuGraph_t {
     std::vector<uint32_t> passProfileEndQuery;
     std::vector<GpuCompiledBarrier> flatBarriers;
     std::vector<std::string> validationWarnings;
-    std::vector<GpuCompiledCopyOp> passCopyOps;
+    std::vector<std::vector<GpuCompiledCopyOp>> passCopyOps;
     rhi::ComPtr<rhi::IHeap> transientHeap;
     std::vector<rhi::HeapAlloc> transientHeapAllocs;
     bool useTransientHeap;
@@ -625,6 +646,25 @@ static void addAccess(GpuGraphPass pass, GpuGraphResource resource, GpuGraphAcce
         }
     }
     pass->accesses.push_back({resource, access, mipLevel, arrayLayer});
+}
+
+GpuResult gpuGraphPassCopyTextureToBuffer(
+    GpuGraphPass pass,
+    GpuGraphResource source,
+    uint32_t sourceMip,
+    uint32_t sourceArrayLayer,
+    GpuGraphResource destination,
+    uint64_t destinationOffset)
+{
+    if (!pass || pass->kind != GPU_GRAPH_PASS_COPY ||
+        source == GPU_GRAPH_NULL_RESOURCE || destination == GPU_GRAPH_NULL_RESOURCE) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    pass->textureToBufferCopies.push_back(
+        {source, sourceMip, sourceArrayLayer, destination, destinationOffset});
+    addAccess(pass, source, GPU_GRAPH_ACCESS_READ, sourceMip, sourceArrayLayer);
+    addAccess(pass, destination, GPU_GRAPH_ACCESS_WRITE, 0, 0);
+    return GPU_SUCCESS;
 }
 
 void gpuGraphPassRead(GpuGraphPass pass, GpuGraphResource resource)
@@ -1156,6 +1196,68 @@ GpuResult gpuGraphCompile(GpuGraph graph)
         auto& pass = *graph->passes[pi];
         if (pass.culled || pass.kind != GPU_GRAPH_PASS_COPY) continue;
 
+        for (const auto& requested : pass.textureToBufferCopies) {
+            if (requested.source == 0 || requested.source > resCount ||
+                requested.destination == 0 || requested.destination > resCount) {
+                return GPU_ERROR_INVALID_ARGS;
+            }
+            auto& srcRes = graph->resources[requested.source - 1];
+            auto& dstRes = graph->resources[requested.destination - 1];
+            if (srcRes.kind != GPU_GRAPH_RESOURCE_TEXTURE ||
+                dstRes.kind != GPU_GRAPH_RESOURCE_BUFFER) {
+                return GPU_ERROR_INVALID_ARGS;
+            }
+
+            GpuTextureFootprint footprint = {};
+            rhi::ITexture* srcTexture = nullptr;
+            GpuResult footprintResult = GPU_ERROR_INVALID_ARGS;
+            if (srcRes.isSurfaceTexture) {
+                srcTexture = srcRes.importedSurfaceTexture->rhiTexture;
+                footprintResult = gpuGetSurfaceTextureReadbackFootprint(
+                    srcRes.importedSurfaceTexture, requested.sourceMip, &footprint);
+            } else {
+                GpuTextureHandle sourceHandle =
+                    srcRes.imported ? srcRes.importedTexture : srcRes.realizedTexture;
+                srcTexture = graph->device->texturePool.resolve(
+                    sourceHandle.index, sourceHandle.generation);
+                footprintResult = gpuGetTextureReadbackFootprint(
+                    graph->device, sourceHandle, requested.sourceMip, &footprint);
+            }
+            if (footprintResult != GPU_SUCCESS || !srcTexture ||
+                requested.sourceArrayLayer >= srcTexture->getDesc().arrayLength) {
+                return footprintResult == GPU_SUCCESS
+                    ? GPU_ERROR_INVALID_ARGS
+                    : footprintResult;
+            }
+
+            GpuBufferHandle destinationHandle =
+                dstRes.imported ? dstRes.importedBuffer : dstRes.realizedBuffer;
+            rhi::IBuffer* destinationBuffer = graph->device->bufferPool.resolve(
+                destinationHandle.index, destinationHandle.generation);
+            if (!destinationBuffer ||
+                requested.destinationOffset > destinationBuffer->getDesc().size ||
+                footprint.totalSize >
+                    destinationBuffer->getDesc().size - requested.destinationOffset) {
+                return GPU_ERROR_INVALID_ARGS;
+            }
+
+            GpuCompiledCopyOp op = {};
+            op.kind = GpuCompiledCopyOp::TextureToBuffer;
+            op.dstBuffer = destinationHandle;
+            op.srcTexture = srcTexture;
+            op.srcMip = requested.sourceMip;
+            op.srcArrayLayer = requested.sourceArrayLayer;
+            op.dstOffset = requested.destinationOffset;
+            op.rowPitch = footprint.rowPitch;
+            op.width = footprint.width;
+            op.height = footprint.height;
+            op.depth = footprint.depth;
+            op.size = footprint.totalSize;
+            graph->passCopyOps[pi].push_back(op);
+        }
+
+        if (!pass.textureToBufferCopies.empty()) continue;
+
         GpuBufferHandle src = {}, dst = {};
         uint64_t srcSize = 0, dstSize = 0;
         for (auto& acc : pass.accesses) {
@@ -1173,11 +1275,12 @@ GpuResult gpuGraphCompile(GpuGraph graph)
             }
         }
         if (src.index != 0 && dst.index != 0) {
-            auto& op = graph->passCopyOps[pi];
-            op.src = src;
-            op.dst = dst;
+            GpuCompiledCopyOp op = {};
+            op.kind = GpuCompiledCopyOp::BufferToBuffer;
+            op.srcBuffer = src;
+            op.dstBuffer = dst;
             op.size = srcSize < dstSize ? srcSize : dstSize;
-            op.valid = op.size > 0;
+            if (op.size > 0) graph->passCopyOps[pi].push_back(op);
         }
     }
 
@@ -1216,6 +1319,26 @@ static void emitBarriers(GpuGraph graph, GpuCommandEncoder encoder, GpuQueueType
                     b.mipLevel, b.arrayLayer, b.after);
             } else {
                 gpuCmdSetTextureState(graph->device, encoder, b.tex, b.after);
+            }
+        } else if (b.isTexture && b.resourceIndex < graph->resources.size()) {
+            auto& resource = graph->resources[b.resourceIndex];
+            if (resource.isSurfaceTexture && resource.importedSurfaceTexture) {
+                rhi::ResourceState state = rhi::ResourceState::Undefined;
+                switch (b.after) {
+                case GPU_RESOURCE_STATE_RENDER_TARGET:
+                    state = rhi::ResourceState::RenderTarget;
+                    break;
+                case GPU_RESOURCE_STATE_COPY_SOURCE:
+                    state = rhi::ResourceState::CopySource;
+                    break;
+                case GPU_RESOURCE_STATE_PRESENT:
+                    state = rhi::ResourceState::Present;
+                    break;
+                default:
+                    break;
+                }
+                encoder->rhiEncoder->setTextureState(
+                    resource.importedSurfaceTexture->rhiTexture, state);
             }
         } else if (!b.isTexture && b.buf.index != 0) {
             gpuCmdSetBufferState(graph->device, encoder, b.buf, b.after);
@@ -1332,9 +1455,25 @@ static void executeGraphPass(GpuGraph graph, GpuCommandEncoder encoder, GpuQueue
         }
     } else {
         if (pass.kind == GPU_GRAPH_PASS_COPY && pi < graph->passCopyOps.size()) {
-            auto& copyOp = graph->passCopyOps[pi];
-            if (copyOp.valid) {
-                gpuCmdCopyBuffer(encoder, copyOp.dst, 0, copyOp.src, 0, copyOp.size);
+            for (const auto& copyOp : graph->passCopyOps[pi]) {
+                if (copyOp.kind == GpuCompiledCopyOp::BufferToBuffer) {
+                    gpuCmdCopyBuffer(
+                        encoder, copyOp.dstBuffer, 0, copyOp.srcBuffer, 0, copyOp.size);
+                    continue;
+                }
+                rhi::IBuffer* destination = graph->device->bufferPool.resolve(
+                    copyOp.dstBuffer.index, copyOp.dstBuffer.generation);
+                if (!destination || !copyOp.srcTexture) continue;
+                encoder->rhiEncoder->copyTextureToBuffer(
+                    destination,
+                    copyOp.dstOffset,
+                    copyOp.size,
+                    copyOp.rowPitch,
+                    copyOp.srcTexture,
+                    copyOp.srcArrayLayer,
+                    copyOp.srcMip,
+                    {0, 0, 0},
+                    {copyOp.width, copyOp.height, copyOp.depth});
             }
         }
         if (pass.callback) pass.callback(&ctx, pass.userData);

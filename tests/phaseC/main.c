@@ -972,6 +972,98 @@ int main(void)
     }
     printf("  OK\n"); flush();
 
+    /* C.46 Graph-owned surface capture */
+    printf("[C.46] Graph-owned surface capture\n"); flush();
+    {
+        CHECK(gpuPlatformInit());
+        GpuWindow window;
+        GpuWindowDesc windowDesc = {
+            .title = "phaseC_surface_capture",
+            .width = 32,
+            .height = 32,
+            .resizable = false,
+            .vsync = false,
+        };
+        CHECK(gpuCreateWindow(&windowDesc, &window));
+        GpuDevice captureDevice;
+        GpuDeviceDesc deviceDesc = {
+            .appName = "phaseC_surface_capture",
+            .enableDebugLayer = true,
+            .preferredBackend = GPU_BACKEND_DEFAULT,
+        };
+        CHECK(gpuCreateDevice(&deviceDesc, &captureDevice));
+        GpuSurface surface;
+        CHECK(gpuCreateSurface(
+            captureDevice, window, GPU_SURFACE_TYPE_D3D12, &surface));
+        GpuFormat surfaceFormat = gpuSurfaceGetPreferredFormat(surface);
+        CHECK_TRUE(surfaceFormat == GPU_FORMAT_RGBA8_UNORM ||
+                   surfaceFormat == GPU_FORMAT_RGBA8_UNORM_SRGB ||
+                   surfaceFormat == GPU_FORMAT_BGRA8_UNORM ||
+                   surfaceFormat == GPU_FORMAT_BGRA8_UNORM_SRGB);
+        CHECK(gpuSurfaceConfigure(surface, 32, 32, surfaceFormat, false));
+        GpuCommandQueue captureQueue;
+        CHECK(gpuGetQueue(captureDevice, GPU_QUEUE_TYPE_GRAPHICS, &captureQueue));
+        GpuSurfaceTexture surfaceTexture;
+        CHECK(gpuSurfaceAcquireNextImage(surface, &surfaceTexture));
+        GpuTextureFootprint footprint = {0};
+        CHECK(gpuGetSurfaceTextureReadbackFootprint(
+            surfaceTexture, 0, &footprint));
+        CHECK_TRUE(footprint.width == 32 && footprint.height == 32);
+        GpuBufferHandle readback;
+        CHECK(gpuCreateReadbackBuffer(
+            captureDevice, footprint.totalSize, &readback));
+
+        GpuGraph graph;
+        CHECK(gpuGraphCreate(captureDevice, &graph));
+        GpuGraphResource surfaceResource = gpuGraphImportSurfaceTexture(
+            graph, surfaceTexture, "surface_capture_source");
+        GpuGraphResource readbackResource = gpuGraphImportBufferEx(
+            graph,
+            readback,
+            GPU_RESOURCE_STATE_COPY_DEST,
+            GPU_RESOURCE_STATE_COPY_DEST,
+            "surface_capture_readback");
+        GpuGraphPass render = gpuGraphAddRenderPass(graph, "surface_clear");
+        GpuGraphColorAttachment attachment = {
+            .resource = surfaceResource,
+            .loadOp = GPU_LOAD_OP_CLEAR,
+            .storeOp = GPU_STORE_OP_STORE,
+            .clearColor = {0.0f, 1.0f, 0.0f, 1.0f},
+        };
+        gpuGraphPassSetColorAttachments(render, 1, &attachment);
+        GpuGraphPass copy = gpuGraphAddCopyPass(graph, "surface_capture");
+        CHECK(gpuGraphPassCopyTextureToBuffer(
+            copy, surfaceResource, 0, 0, readbackResource, 0));
+        CHECK(gpuGraphCompile(graph));
+        CHECK(gpuGraphExecute(graph, captureQueue));
+        CHECK(gpuSurfacePresent(surface));
+        CHECK(gpuQueueWaitOnHost(captureQueue));
+
+        void* mapped = NULL;
+        CHECK(gpuMapReadbackBuffer(captureDevice, readback, &mapped));
+        for (uint32_t y = 0; y < footprint.height; ++y) {
+            const uint8_t* row =
+                (const uint8_t*)mapped + y * footprint.rowPitch;
+            for (uint32_t x = 0; x < footprint.width; ++x) {
+                const uint8_t* pixel = row + x * 4;
+                CHECK_TRUE(pixel[0] == 0u);
+                CHECK_TRUE(pixel[1] == 255u);
+                CHECK_TRUE(pixel[2] == 0u);
+                CHECK_TRUE(pixel[3] == 255u);
+            }
+        }
+        gpuUnmapReadbackBuffer(captureDevice, readback);
+        gpuGraphDestroy(graph);
+        gpuDestroyBuffer(captureDevice, readback);
+        gpuSurfaceTextureRelease(surfaceTexture);
+        gpuSurfaceUnconfigure(surface);
+        gpuDestroySurface(captureDevice, surface);
+        gpuDestroyDevice(captureDevice);
+        gpuDestroyWindow(window);
+        gpuPlatformShutdown();
+    }
+    printf("  OK\n"); flush();
+
     if (isSoftwareVulkanAdapter(device)) {
         printf("[C.30-C.38] Skipped on software Vulkan\n"); flush();
         goto phasec_finish_tests;

@@ -10,6 +10,7 @@ extern "C" {
 
 typedef struct GpuDevice_t* GpuDevice;
 typedef struct GpuCommandEncoder_t* GpuCommandEncoder;
+typedef struct GpuSurfaceTexture_t* GpuSurfaceTexture;
 
 typedef struct {
     GpuFormat format;
@@ -32,6 +33,10 @@ void gpuUnmapReadbackBuffer(GpuDevice device, GpuBufferHandle handle);
 GpuResult gpuGetTextureReadbackFootprint(
     GpuDevice device,
     GpuTextureHandle texture,
+    uint32_t mipLevel,
+    GpuTextureFootprint* outFootprint);
+GpuResult gpuGetSurfaceTextureReadbackFootprint(
+    GpuSurfaceTexture texture,
     uint32_t mipLevel,
     GpuTextureFootprint* outFootprint);
 

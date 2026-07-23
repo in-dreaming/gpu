@@ -84,6 +84,14 @@ GpuGraphPass gpuGraphAddRenderPass(GpuGraph graph, const char* name);
 GpuGraphPass gpuGraphAddComputePass(GpuGraph graph, const char* name);
 GpuGraphPass gpuGraphAddCopyPass(GpuGraph graph, const char* name);
 
+GpuResult gpuGraphPassCopyTextureToBuffer(
+    GpuGraphPass pass,
+    GpuGraphResource source,
+    uint32_t sourceMip,
+    uint32_t sourceArrayLayer,
+    GpuGraphResource destination,
+    uint64_t destinationOffset);
+
 void gpuGraphPassRead(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassWrite(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassReadWrite(GpuGraphPass pass, GpuGraphResource resource);
