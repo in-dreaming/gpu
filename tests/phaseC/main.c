@@ -1065,6 +1065,47 @@ int main(void)
     }
     printf("  OK\n"); flush();
 
+    /* C.48 Ordered WAW is barrier metadata, not a validation warning */
+    printf("[C.48] Ordered write-after-write validation\n"); flush();
+    {
+        GpuBufferDesc bdesc = {
+            .size = 64, .elementSize = 4,
+            .usage = GPU_BUFFER_USAGE_UNORDERED_ACCESS,
+            .label = "ordered_waw_buf"
+        };
+        GpuBufferHandle handle;
+        CHECK(gpuCreateBuffer(device, &bdesc, &handle));
+        GpuGraph graph;
+        CHECK(gpuGraphCreate(device, &graph));
+        GpuGraphResource buffer = gpuGraphImportBufferEx(
+            graph,
+            handle,
+            GPU_RESOURCE_STATE_UNORDERED_ACCESS,
+            GPU_RESOURCE_STATE_UNORDERED_ACCESS,
+            "ordered_waw_buf");
+        GpuGraphPass first = gpuGraphAddComputePass(graph, "ordered_waw_first");
+        GpuGraphPass second = gpuGraphAddComputePass(graph, "ordered_waw_second");
+        gpuGraphPassWrite(first, buffer);
+        gpuGraphPassWrite(second, buffer);
+        gpuGraphPassSetCallback(first, noop_pass_callback, NULL);
+        gpuGraphPassSetCallback(second, noop_pass_callback, NULL);
+        CHECK(gpuGraphCompile(graph));
+        CHECK_TRUE(gpuGraphGetValidationWarningCount(graph) == 0);
+        bool foundWawBarrier = false;
+        for (uint32_t bi = 0; bi < gpuGraphGetPassBarrierCount(graph, 1); ++bi) {
+            GpuGraphBarrierInfo info = {0};
+            CHECK(gpuGraphGetPassBarrier(graph, 1, bi, &info));
+            if (info.isGlobalBarrier && info.hazardKind == GPU_HAZARD_WRITE_AFTER_WRITE)
+                foundWawBarrier = true;
+        }
+        CHECK_TRUE(foundWawBarrier);
+        CHECK(gpuGraphExecute(graph, queue));
+        CHECK(gpuQueueWaitOnHost(queue));
+        gpuGraphDestroy(graph);
+        gpuDestroyBuffer(device, handle);
+    }
+    printf("  OK\n"); flush();
+
     if (isSoftwareVulkanAdapter(device)) {
         printf("[C.30-C.38] Skipped on software Vulkan\n"); flush();
         goto phasec_finish_tests;

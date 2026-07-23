@@ -1014,7 +1014,12 @@ GpuResult gpuGraphCompile(GpuGraph graph)
         }
 
         GpuHazardKind hazard = gpuHazardClassify(res.currentState, access, res.hadWriter);
-        if (hazard != GPU_HAZARD_NONE && hazard != GPU_HAZARD_READ_AFTER_WRITE) {
+        // Ordered RAW/WAW accesses are normal graph dependencies. The
+        // compiler emits the required transition/UAV barrier above; reporting
+        // those resolved hazards as validation warnings makes valid load/store
+        // pass chains appear unsafe. Only an actual uninitialized access is a
+        // graph validation defect here.
+        if (hazard == GPU_HAZARD_UNINITIALIZED_ACCESS) {
             char msg[256];
             snprintf(msg, sizeof(msg), "pass %u resource '%s': %s",
                      pi, res.name.c_str(), gpuHazardKindName(hazard));
