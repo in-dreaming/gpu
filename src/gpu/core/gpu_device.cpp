@@ -21,11 +21,21 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
     if (!desc || !outDevice) return GPU_ERROR_INVALID_ARGS;
 
     GpuDevice device = new GpuDevice_t();
-    device->rhiDebugCallback = new GpuRhiDebugCallback(device);
+    device->rhiDebugCallback = std::make_unique<GpuRhiDebugCallback>(device);
+
+    if (desc->enableDebugLayer && !rhi::getRHI()->isDebugLayersEnabled()) {
+        rhi::DebugLayerOptions debugOptions = {};
+        debugOptions.required = true;
+        debugOptions.coreValidation = true;
+        if (SLANG_FAILED(rhi::getRHI()->setDebugLayerOptions(debugOptions))) {
+            delete device;
+            return GPU_ERROR_NOT_SUPPORTED;
+        }
+    }
 
     rhi::DeviceDesc rhiDesc = {};
     rhiDesc.enableValidation = desc->enableDebugLayer;
-    rhiDesc.debugCallback = device->rhiDebugCallback;
+    rhiDesc.debugCallback = device->rhiDebugCallback.get();
     // Bindless descriptor handles require SM 6.6 on D3D12; let slang-rhi pick the highest supported profile.
     rhiDesc.slang.targetProfile = nullptr;
     rhiDesc.bindless.textureCount = 4096;

@@ -116,7 +116,8 @@ void gpuEmitValidation(GpuDevice device, GpuValidationSeverity severity, const c
     GpuDebugLevel debugLevel = GPU_DEBUG_LEVEL_NONE;
     {
         std::lock_guard<std::mutex> lock(device->debugMutex);
-        device->lastError = message;
+        if (!device->lastError.empty()) device->lastError.append("\n");
+        device->lastError.append(message);
         validationCallback = device->validationCallback;
         validationUserData = device->validationUserData;
         debugLevel = device->debugLevel;

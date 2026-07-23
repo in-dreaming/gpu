@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <filesystem>
 #include <cstdio>
@@ -51,7 +52,7 @@ private:
 };
 
 struct GpuDevice_t {
-    rhi::ComPtr<rhi::IDebugCallback> rhiDebugCallback;
+    std::unique_ptr<GpuRhiDebugCallback> rhiDebugCallback;
     rhi::ComPtr<rhi::IDevice> rhiDevice;
     rhi::ComPtr<rhi::ICommandQueue> graphicsQueue;
     rhi::ComPtr<rhi::ICommandQueue> computeQueue;
