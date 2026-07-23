@@ -55,7 +55,14 @@ GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuText
     rhiDesc.mipCount = desc->mipCount > 0 ? desc->mipCount : 1;
     rhiDesc.format = gpuFormatToRhi(desc->format);
     rhiDesc.sampleCount = desc->sampleCount > 0 ? desc->sampleCount : 1;
-    rhiDesc.usage = static_cast<rhi::TextureUsage>(gpuTextureUsageToRhi(desc->usage));
+    GpuTextureUsage implementationUsage = desc->usage;
+    if ((implementationUsage & GPU_TEXTURE_USAGE_RENDER_TARGET) != 0 &&
+        (implementationUsage & GPU_TEXTURE_USAGE_UNORDERED_ACCESS) != 0) {
+        implementationUsage = static_cast<GpuTextureUsage>(
+            implementationUsage | GPU_TEXTURE_USAGE_COPY_DEST);
+    }
+    rhiDesc.usage = static_cast<rhi::TextureUsage>(
+        gpuTextureUsageToRhi(implementationUsage));
     rhiDesc.defaultState = gpuDefaultTextureRhiState(desc->usage);
     rhiDesc.label = desc->label;
     rhiDesc.memoryType = rhi::MemoryType::DeviceLocal;
