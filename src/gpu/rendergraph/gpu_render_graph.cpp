@@ -923,6 +923,28 @@ GpuResult gpuGraphCompile(GpuGraph graph)
         }
     }
 
+    // Integer attachment clears are implemented with clearTextureUint/Sint
+    // before opening the render pass. Transient graph textures therefore need
+    // UAV capability even when the caller only declared render-target and copy
+    // usage. Imported textures retain their explicit usage contract and are
+    // validated below.
+    for (const auto& pass : graph->passes) {
+        if (pass->culled) continue;
+        for (const auto& attachment : pass->colorAttachments) {
+            if (attachment.loadOp != GPU_LOAD_OP_CLEAR ||
+                (attachment.clearType != GPU_GRAPH_CLEAR_UINT &&
+                 attachment.clearType != GPU_GRAPH_CLEAR_SINT) ||
+                attachment.resource == GPU_GRAPH_NULL_RESOURCE) continue;
+            const uint32_t ri = attachment.resource - 1;
+            if (ri >= graph->resources.size()) continue;
+            auto& res = graph->resources[ri];
+            if (!res.imported && res.kind == GPU_GRAPH_RESOURCE_TEXTURE) {
+                res.textureDesc.usage = static_cast<GpuTextureUsage>(
+                    res.textureDesc.usage | GPU_TEXTURE_USAGE_UNORDERED_ACCESS);
+            }
+        }
+    }
+
     assignLifetimeAliasing(graph);
 
     graph->useTransientHeap = gpuDeviceSupportsTransientHeap(graph->device);
