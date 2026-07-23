@@ -222,6 +222,11 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
             programDesc.slangGlobalScope = globalScope.get();
             programDesc.slangEntryPoints = rawEntries.data();
             programDesc.slangEntryPointCount = (uint32_t)rawEntries.size();
+            // Each supplied backend blob is already the final code for its
+            // reflected entry point. Re-linking all entry points as one Slang
+            // program can reject otherwise valid modules with concrete
+            // structured-buffer layouts and cannot alter the supplied code.
+            programDesc.linkingStyle = rhi::LinkingStyle::SeparateEntryPointCompilation;
             programDesc.precompiledEntryPointCode = precompiledCode.data();
             programDesc.precompiledEntryPointCodeCount = (uint32_t)precompiledCode.size();
             if (SLANG_FAILED(device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef()))) {
