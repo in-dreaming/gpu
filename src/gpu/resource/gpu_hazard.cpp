@@ -64,16 +64,11 @@ bool gpuHazardNeedsGlobalBarrier(GpuResourceState beforeState, GpuAccessFlags ne
 
 GpuHazardKind gpuHazardClassify(GpuResourceState currentState, GpuAccessFlags nextAccess, bool hadWriter)
 {
-    if (currentState == GPU_RESOURCE_STATE_UNDEFINED)
-        return GPU_HAZARD_UNINITIALIZED_ACCESS;
     const bool nextWrite = gpuAccessFlagsIsWrite(nextAccess);
-    const bool currentWrite = gpuResourceStateIsUav(currentState) ||
-        currentState == GPU_RESOURCE_STATE_RENDER_TARGET ||
-        currentState == GPU_RESOURCE_STATE_DEPTH_WRITE ||
-        currentState == GPU_RESOURCE_STATE_COPY_DEST;
+    if (currentState == GPU_RESOURCE_STATE_UNDEFINED)
+        return nextWrite ? GPU_HAZARD_NONE : GPU_HAZARD_UNINITIALIZED_ACCESS;
     if (hadWriter && nextWrite) return GPU_HAZARD_WRITE_AFTER_WRITE;
     if (hadWriter && !nextWrite) return GPU_HAZARD_READ_AFTER_WRITE;
-    if (!hadWriter && nextWrite && currentWrite) return GPU_HAZARD_WRITE_AFTER_READ;
     return GPU_HAZARD_NONE;
 }
 

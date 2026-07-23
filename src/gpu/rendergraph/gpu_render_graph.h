@@ -63,6 +63,18 @@ GpuGraphResource gpuGraphCreateBuffer(GpuGraph graph, const GpuBufferDesc* desc,
 
 GpuGraphResource gpuGraphImportTexture(GpuGraph graph, GpuTextureHandle handle, GpuResourceState initialState, const char* name);
 GpuGraphResource gpuGraphImportBuffer(GpuGraph graph, GpuBufferHandle handle, GpuResourceState initialState, const char* name);
+GpuGraphResource gpuGraphImportTextureEx(
+    GpuGraph graph,
+    GpuTextureHandle handle,
+    GpuResourceState initialState,
+    GpuResourceState finalState,
+    const char* name);
+GpuGraphResource gpuGraphImportBufferEx(
+    GpuGraph graph,
+    GpuBufferHandle handle,
+    GpuResourceState initialState,
+    GpuResourceState finalState,
+    const char* name);
 GpuGraphResource gpuGraphImportSurfaceTexture(GpuGraph graph, GpuSurfaceTexture surfaceTex, const char* name);
 
 GpuGraphPass gpuGraphAddRenderPass(GpuGraph graph, const char* name);

@@ -1215,7 +1215,8 @@ int main(void)
             .type = GPU_TEXTURE_TYPE_2D, .width = 64, .height = 64,
             .depth = 1, .arrayLength = 1, .mipCount = 1,
             .format = GPU_FORMAT_RGBA8_UNORM, .sampleCount = 1,
-            .usage = GPU_TEXTURE_USAGE_RENDER_TARGET | GPU_TEXTURE_USAGE_SHADER_RESOURCE,
+            .usage = GPU_TEXTURE_USAGE_RENDER_TARGET | GPU_TEXTURE_USAGE_SHADER_RESOURCE |
+                     GPU_TEXTURE_USAGE_COPY_SOURCE,
             .label = "restore_tex"
         };
         GpuTextureHandle texHandle;
@@ -1223,7 +1224,12 @@ int main(void)
 
         GpuGraph graph;
         CHECK(gpuGraphCreate(device, &graph));
-        GpuGraphResource tex = gpuGraphImportTexture(graph, texHandle, GPU_RESOURCE_STATE_SHADER_RESOURCE, "restore_tex");
+        GpuGraphResource tex = gpuGraphImportTextureEx(
+            graph,
+            texHandle,
+            GPU_RESOURCE_STATE_SHADER_RESOURCE,
+            GPU_RESOURCE_STATE_COPY_SOURCE,
+            "restore_tex");
         GpuGraphPass drawPass = gpuGraphAddRenderPass(graph, "draw");
         GpuGraphColorAttachment ca = {
             .resource = tex, .loadOp = GPU_LOAD_OP_CLEAR, .storeOp = GPU_STORE_OP_STORE,
@@ -1237,11 +1243,12 @@ int main(void)
         for (uint32_t bi = 0; bi < gpuGraphGetPassBarrierCount(graph, lastPi); bi++) {
             GpuGraphBarrierInfo info;
             CHECK(gpuGraphGetPassBarrier(graph, lastPi, bi, &info));
-            if (info.after == GPU_RESOURCE_STATE_SHADER_RESOURCE) foundRestore = true;
+            if (info.after == GPU_RESOURCE_STATE_COPY_SOURCE) foundRestore = true;
         }
         CHECK_TRUE(foundRestore);
         CHECK(gpuGraphExecute(graph, queue));
         gpuQueueWaitOnHost(queue);
+        CHECK_TRUE(gpuGetTextureState(device, texHandle) == GPU_RESOURCE_STATE_COPY_SOURCE);
         gpuGraphDestroy(graph);
         gpuDestroyTexture(device, texHandle);
     }
@@ -1263,17 +1270,51 @@ phasec_finish_tests:
         GpuGraphPass cp = gpuGraphAddComputePass(graph, "warn_compute");
         gpuGraphPassWrite(cp, buf);
         CHECK(gpuGraphCompile(graph));
-        CHECK_TRUE(gpuGraphGetValidationWarningCount(graph) > 0);
         bool foundDowngrade = false;
+        bool foundUninitialized = false;
         for (uint32_t wi = 0; wi < gpuGraphGetValidationWarningCount(graph); wi++) {
             if (strstr(gpuGraphGetValidationWarning(graph, wi), "downgraded") != NULL)
                 foundDowngrade = true;
+            if (strstr(gpuGraphGetValidationWarning(graph, wi), "uninitialized_access") != NULL)
+                foundUninitialized = true;
         }
+        CHECK_TRUE(!foundUninitialized);
         if (!gpuDeviceSupportsIndependentQueues(device))
             CHECK_TRUE(foundDowngrade);
         else
-            CHECK_TRUE(!foundDowngrade);
+            CHECK_TRUE(gpuGraphGetValidationWarningCount(graph) == 0);
         gpuGraphDestroy(graph);
+    }
+    printf("  OK\n"); flush();
+
+    /* C.41 Imported copy-destination first write is not a graph hazard */
+    printf("[C.41] Imported first-write hazard classification\n"); flush();
+    {
+        GpuBufferDesc bdesc = {
+            .size = 128, .elementSize = 4,
+            .usage = GPU_BUFFER_USAGE_UNORDERED_ACCESS | GPU_BUFFER_USAGE_COPY_DEST,
+            .label = "first_write_buf"
+        };
+        GpuBufferHandle handle;
+        CHECK(gpuCreateBuffer(device, &bdesc, &handle));
+        GpuGraph graph;
+        CHECK(gpuGraphCreate(device, &graph));
+        GpuGraphResource buffer = gpuGraphImportBufferEx(
+            graph,
+            handle,
+            GPU_RESOURCE_STATE_COPY_DEST,
+            GPU_RESOURCE_STATE_UNORDERED_ACCESS,
+            "first_write_buf");
+        GpuGraphPass pass = gpuGraphAddComputePass(graph, "first_write");
+        gpuGraphPassWrite(pass, buffer);
+        gpuGraphPassSetCallback(pass, noop_pass_callback, NULL);
+        CHECK(gpuGraphCompile(graph));
+        CHECK_TRUE(gpuGraphGetValidationWarningCount(graph) == 0);
+        CHECK(gpuGraphExecute(graph, queue));
+        CHECK(gpuQueueWaitOnHost(queue));
+        CHECK_TRUE(gpuGetBufferState(device, handle) == GPU_RESOURCE_STATE_UNORDERED_ACCESS);
+        gpuGraphDestroy(graph);
+        gpuDestroyBuffer(device, handle);
     }
     printf("  OK\n"); flush();
 

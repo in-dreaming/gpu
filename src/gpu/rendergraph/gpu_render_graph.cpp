@@ -37,6 +37,7 @@ struct GpuGraphResourceRecord {
     GpuBufferHandle importedBuffer;
     GpuSurfaceTexture importedSurfaceTexture;
     GpuResourceState initialState;
+    GpuResourceState finalState;
 
     GpuTextureHandle realizedTexture;
     GpuBufferHandle realizedBuffer;
@@ -463,6 +464,7 @@ static GpuGraphResource allocResource(GpuGraph graph, GpuGraphResourceKind kind,
     r.imported = false;
     r.isSurfaceTexture = false;
     r.initialState = GPU_RESOURCE_STATE_UNDEFINED;
+    r.finalState = GPU_RESOURCE_STATE_UNDEFINED;
     r.realizedTexture = GPU_NULL_HANDLE;
     r.realizedBuffer = GPU_NULL_HANDLE;
     r.realizedView = GPU_NULL_HANDLE;
@@ -499,12 +501,23 @@ GpuGraphResource gpuGraphCreateBuffer(GpuGraph graph, const GpuBufferDesc* desc,
 
 GpuGraphResource gpuGraphImportTexture(GpuGraph graph, GpuTextureHandle handle, GpuResourceState initialState, const char* name)
 {
+    return gpuGraphImportTextureEx(graph, handle, initialState, initialState, name);
+}
+
+GpuGraphResource gpuGraphImportTextureEx(
+    GpuGraph graph,
+    GpuTextureHandle handle,
+    GpuResourceState initialState,
+    GpuResourceState finalState,
+    const char* name)
+{
     if (!graph || handle.index == 0) return GPU_GRAPH_NULL_RESOURCE;
     GpuGraphResource r = allocResource(graph, GPU_GRAPH_RESOURCE_TEXTURE, name);
     auto& rec = graph->resources[r - 1];
     rec.imported = true;
     rec.importedTexture = handle;
     rec.initialState = initialState;
+    rec.finalState = finalState;
     rec.currentState = initialState;
     rec.realizedTexture = handle;
     return r;
@@ -512,12 +525,23 @@ GpuGraphResource gpuGraphImportTexture(GpuGraph graph, GpuTextureHandle handle, 
 
 GpuGraphResource gpuGraphImportBuffer(GpuGraph graph, GpuBufferHandle handle, GpuResourceState initialState, const char* name)
 {
+    return gpuGraphImportBufferEx(graph, handle, initialState, initialState, name);
+}
+
+GpuGraphResource gpuGraphImportBufferEx(
+    GpuGraph graph,
+    GpuBufferHandle handle,
+    GpuResourceState initialState,
+    GpuResourceState finalState,
+    const char* name)
+{
     if (!graph || handle.index == 0) return GPU_GRAPH_NULL_RESOURCE;
     GpuGraphResource r = allocResource(graph, GPU_GRAPH_RESOURCE_BUFFER, name);
     auto& rec = graph->resources[r - 1];
     rec.imported = true;
     rec.importedBuffer = handle;
     rec.initialState = initialState;
+    rec.finalState = finalState;
     rec.currentState = initialState;
     rec.realizedBuffer = handle;
     if (rhi::IBuffer* buf = graph->device->bufferPool.resolve(handle.index, handle.generation)) {
@@ -537,6 +561,7 @@ GpuGraphResource gpuGraphImportSurfaceTexture(GpuGraph graph, GpuSurfaceTexture 
     rec.isSurfaceTexture = true;
     rec.importedSurfaceTexture = surfaceTex;
     rec.initialState = GPU_RESOURCE_STATE_PRESENT;
+    rec.finalState = GPU_RESOURCE_STATE_PRESENT;
     rec.currentState = GPU_RESOURCE_STATE_PRESENT;
     return r;
 }
@@ -1008,12 +1033,34 @@ GpuResult gpuGraphCompile(GpuGraph graph)
     }
 
     for (auto& res : graph->resources) {
-        if (res.imported && res.initialState != res.currentState) {
-            if (!graph->executionOrder.empty()) {
-                uint32_t lastPi = graph->executionOrder.back();
-                uint32_t ri = (uint32_t)(&res - &graph->resources[0]);
-                pushBarrier(graph->passBarriers[lastPi], res, ri, lastPi, res.initialState,
-                            gpuAccessFlagsForResourceState(res.initialState), 0, 0);
+        if (res.imported && res.finalState != res.currentState) {
+            const uint32_t ri = (uint32_t)(&res - &graph->resources[0]);
+            uint32_t lastPi = UINT32_MAX;
+            for (auto it = graph->executionOrder.rbegin();
+                 it != graph->executionOrder.rend() && lastPi == UINT32_MAX;
+                 ++it) {
+                const uint32_t candidate = *it;
+                const auto& pass = *graph->passes[candidate];
+                if (pass.culled) continue;
+                for (const auto& access : pass.accesses) {
+                    if (access.resource == ri + 1) {
+                        lastPi = candidate;
+                        break;
+                    }
+                }
+                for (const auto& attachment : pass.colorAttachments) {
+                    if (attachment.resource == ri + 1) {
+                        lastPi = candidate;
+                        break;
+                    }
+                }
+                if (pass.hasDepth && pass.depthAttachment.resource == ri + 1) {
+                    lastPi = candidate;
+                }
+            }
+            if (lastPi != UINT32_MAX) {
+                pushBarrier(graph->passBarriers[lastPi], res, ri, lastPi, res.finalState,
+                            gpuAccessFlagsForResourceState(res.finalState), 0, 0);
             }
         }
     }
