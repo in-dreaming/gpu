@@ -51,7 +51,7 @@ GpuResourceState gpuResourceStateForAccessFlags(GpuAccessFlags access, bool isBu
 bool gpuAccessFlagsIsWrite(GpuAccessFlags access)
 {
     return (access & (GPU_ACCESS_SHADER_WRITE | GPU_ACCESS_COLOR_ATTACHMENT | GPU_ACCESS_DEPTH_WRITE |
-                      GPU_ACCESS_COPY_WRITE | GPU_ACCESS_PRESENT)) != 0;
+                      GPU_ACCESS_COPY_WRITE)) != 0;
 }
 
 bool gpuResourceStateIsUav(GpuResourceState state)

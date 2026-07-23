@@ -1035,6 +1035,7 @@ int main(void)
         CHECK(gpuGraphPassCopyTextureToBuffer(
             copy, surfaceResource, 0, 0, readbackResource, 0));
         CHECK(gpuGraphCompile(graph));
+        CHECK_TRUE(gpuGraphGetValidationWarningCount(graph) == 0);
         CHECK(gpuGraphExecute(graph, captureQueue));
         CHECK(gpuSurfacePresent(surface));
         CHECK(gpuQueueWaitOnHost(captureQueue));
