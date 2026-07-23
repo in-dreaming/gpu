@@ -1065,6 +1065,29 @@ int main(void)
     }
     printf("  OK\n"); flush();
 
+    /* C.49 Compute pipeline binary descriptor honors its entry point */
+    printf("[C.49] Compute pipeline descriptor entry point\n"); flush();
+    {
+        static const char computeSource[] =
+            "RWStructuredBuffer<uint> gOutput : register(u0);\n"
+            "[numthreads(1, 1, 1)]\n"
+            "void computeMain(uint3 id : SV_DispatchThreadID) "
+            "{ gOutput[id.x] = id.x + 41; }\n";
+        GpuComputePipelineDesc2 desc = {
+            .label = "compute_descriptor_entry",
+            .computeShader = {
+                .data = (const uint8_t *)computeSource,
+                .size = sizeof(computeSource) - 1,
+                .entryPoint = "computeMain",
+            },
+        };
+        GpuPipelineHandle pipeline = GPU_NULL_HANDLE;
+        CHECK(gpuCreateComputePipeline2(device, &desc, &pipeline));
+        CHECK_TRUE(gpuGetPipelineType(device, pipeline) == GPU_PIPELINE_TYPE_COMPUTE);
+        CHECK(gpuDestroyPipeline(device, pipeline));
+    }
+    printf("  OK\n"); flush();
+
     /* C.48 Ordered WAW is barrier metadata, not a validation warning */
     printf("[C.48] Ordered write-after-write validation\n"); flush();
     {

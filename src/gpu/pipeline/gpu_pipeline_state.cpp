@@ -406,52 +406,95 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
     if (!device || !desc || !outPipeline) {
         return GPU_ERROR_INVALID_PARAMETER;
     }
-
-    rhi::ComPtr<slang::ISession> slangSession;
-    if (SLANG_FAILED(device->rhiDevice->getSlangSession(slangSession.writeRef()))) {
-        return GPU_ERROR_INTERNAL;
-    }
-
-    rhi::ComPtr<slang::IModule> csModule;
-    if (desc->computeShader.data && desc->computeShader.size > 0) {
-        std::string csSrc((const char*)desc->computeShader.data, (size_t)desc->computeShader.size);
-
-        std::string csPath;
-        if (!gpuWriteTextTempFile("gpu_cs.slang", csSrc.c_str(), csPath)) {
-            return GPU_ERROR_INTERNAL;
-        }
-
-        slang::IBlob* csDiag = nullptr;
-        csModule = slangSession->loadModule(csPath.c_str(), &csDiag);
-        if (csDiag) csDiag->release();
-        if (!csModule) {
-            return GPU_ERROR_INTERNAL;
-        }
-    } else {
+    device->lastError.clear();
+    const GpuShaderBinary& shader = desc->computeShader;
+    if (!shader.data || shader.size == 0) {
+        device->lastError = "compute pipeline has no shader data";
         return GPU_ERROR_INVALID_PARAMETER;
     }
 
+    rhi::ComPtr<slang::ISession> slangSession;
+    if (SLANG_FAILED(device->rhiDevice->getSlangSession(slangSession.writeRef()))) {
+        device->lastError = "compute pipeline could not get Slang session";
+        return GPU_ERROR_INTERNAL;
+    }
+
+    rhi::ComPtr<slang::IModule> module;
+    const bool precompiled = shader.moduleData && shader.moduleSize > 0;
+    if (precompiled) {
+        const char* moduleName = shader.moduleName ? shader.moduleName : "gpu_precompiled_cs";
+        rhi::ComPtr<ISlangBlob> moduleBlob(
+            slang_createBlob(shader.moduleData, (size_t)shader.moduleSize));
+        if (!moduleBlob) {
+            device->lastError = "compute pipeline could not allocate serialized module blob";
+            return GPU_ERROR_OUT_OF_MEMORY;
+        }
+        rhi::ComPtr<ISlangBlob> diagnostics;
+        module = slangSession->loadModuleFromIRBlob(
+            moduleName, moduleName, moduleBlob, diagnostics.writeRef());
+        if (!module) {
+            if (diagnostics && diagnostics->getBufferPointer())
+                device->lastError.assign(
+                    (const char*)diagnostics->getBufferPointer(),
+                    diagnostics->getBufferSize());
+            else
+                device->lastError = "Slang rejected serialized compute module IR";
+            return GPU_ERROR_INVALID_PARAMETER;
+        }
+    } else {
+        std::string csSrc((const char*)shader.data, (size_t)shader.size);
+        std::string csPath;
+        if (!gpuWriteTextTempFile("gpu_cs.slang", csSrc.c_str(), csPath)) {
+            device->lastError = "compute pipeline could not materialize source module";
+            return GPU_ERROR_INTERNAL;
+        }
+        slang::IBlob* csDiag = nullptr;
+        module = slangSession->loadModule(csPath.c_str(), &csDiag);
+        if (!module && csDiag && csDiag->getBufferPointer())
+            device->lastError.assign(
+                (const char*)csDiag->getBufferPointer(),
+                csDiag->getBufferSize());
+        if (csDiag) csDiag->release();
+        if (!module) {
+            if (device->lastError.empty()) device->lastError = "Slang rejected compute source module";
+            return GPU_ERROR_INTERNAL;
+        }
+    }
+
     rhi::ComPtr<slang::IEntryPoint> csEntry;
-    if (SLANG_FAILED(csModule->findEntryPointByName("main", csEntry.writeRef()))) {
+    const char* entryName = shader.entryPoint ? shader.entryPoint : "main";
+    if (SLANG_FAILED(module->findEntryPointByName(entryName, csEntry.writeRef()))) {
+        device->lastError = std::string("compute module has no entry point: ") + entryName;
         return GPU_ERROR_INVALID_ARGS;
     }
 
-    slang::IComponentType* components[] = { csModule.get(), csEntry.get() };
-    rhi::ComPtr<slang::IComponentType> linked;
+    slang::IComponentType* components[] = { module.get(), csEntry.get() };
+    rhi::ComPtr<slang::IComponentType> globalScope;
     rhi::ComPtr<slang::IBlob> linkDiag;
-    slangSession->createCompositeComponentType(components, 2, linked.writeRef(), linkDiag.writeRef());
-
-    if (!linked) return GPU_ERROR_INTERNAL;
+    if (SLANG_FAILED(slangSession->createCompositeComponentType(
+            components, precompiled ? 1u : 2u, globalScope.writeRef(), linkDiag.writeRef())) ||
+        !globalScope) {
+        device->lastError = "compute pipeline could not compose shader module";
+        return GPU_ERROR_INVALID_PARAMETER;
+    }
 
     rhi::ShaderProgramDesc programDesc = {};
-    programDesc.slangGlobalScope = linked.get();
+    programDesc.slangGlobalScope = globalScope.get();
     slang::IComponentType* entries[] = { csEntry.get() };
     programDesc.slangEntryPoints = entries;
     programDesc.slangEntryPointCount = 1;
+    rhi::ShaderEntryPointCode precompiledCode = {
+        shader.data, (size_t)shader.size
+    };
+    if (precompiled) {
+        programDesc.precompiledEntryPointCode = &precompiledCode;
+        programDesc.precompiledEntryPointCodeCount = 1;
+    }
 
     rhi::ComPtr<rhi::IShaderProgram> rhiProgram;
     if (SLANG_FAILED(device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef()))) {
-        return GPU_ERROR_INTERNAL;
+        device->lastError = "compute pipeline could not create shader program";
+        return GPU_ERROR_INVALID_PARAMETER;
     }
 
     rhi::ComputePipelineDesc rhiDesc = {};
@@ -462,6 +505,7 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
     rhi::Result r = device->rhiDevice->createComputePipeline(rhiDesc, rhiPipeline.writeRef());
 
     if (SLANG_FAILED(r)) {
+        device->lastError = "compute pipeline state creation failed";
         return GPU_ERROR_UNKNOWN;
     }
 
