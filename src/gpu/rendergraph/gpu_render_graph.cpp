@@ -1010,6 +1010,29 @@ GpuResult gpuGraphCompile(GpuGraph graph)
             uint32_t ri = pass.colorAttachments[ai].resource - 1;
             if (ri >= resCount) continue;
             auto& res = graph->resources[ri];
+            const auto& attachment = pass.colorAttachments[ai];
+            if (attachment.clearType > GPU_GRAPH_CLEAR_SINT) {
+                return GPU_ERROR_INVALID_ARGS;
+            }
+            if (attachment.loadOp == GPU_LOAD_OP_CLEAR &&
+                attachment.clearType != GPU_GRAPH_CLEAR_FLOAT) {
+                if (res.isSurfaceTexture) return GPU_ERROR_NOT_SUPPORTED;
+                GpuTextureHandle handle =
+                    res.imported ? res.importedTexture : res.realizedTexture;
+                rhi::ITexture* texture =
+                    graph->device->texturePool.resolve(handle.index, handle.generation);
+                if (!texture ||
+                    (texture->getDesc().usage & rhi::TextureUsage::UnorderedAccess) ==
+                        rhi::TextureUsage::None) {
+                    return GPU_ERROR_NOT_SUPPORTED;
+                }
+                const auto& info = rhi::getFormatInfo(texture->getDesc().format);
+                if (info.kind != rhi::FormatKind::Integer ||
+                    (attachment.clearType == GPU_GRAPH_CLEAR_UINT && info.isSigned) ||
+                    (attachment.clearType == GPU_GRAPH_CLEAR_SINT && !info.isSigned)) {
+                    return GPU_ERROR_INVALID_ARGS;
+                }
+            }
             pushBarrier(barriers, res, ri, pi, GPU_RESOURCE_STATE_RENDER_TARGET,
                         GPU_ACCESS_COLOR_ATTACHMENT | GPU_ACCESS_SHADER_WRITE, 0, 0);
         }
@@ -1238,7 +1261,31 @@ static void executeGraphPass(GpuGraph graph, GpuCommandEncoder encoder, GpuQueue
             }
             dst.loadOp = src.loadOp;
             dst.storeOp = src.storeOp;
-            memcpy(dst.clearValue, src.clearColor, sizeof(float) * 4);
+            if (src.loadOp == GPU_LOAD_OP_CLEAR &&
+                src.clearType != GPU_GRAPH_CLEAR_FLOAT) {
+                GpuTextureHandle handle =
+                    res.imported ? res.importedTexture : res.realizedTexture;
+                rhi::ITexture* texture =
+                    graph->device->texturePool.resolve(handle.index, handle.generation);
+                gpuCmdSetTextureState(
+                    graph->device, encoder, handle, GPU_RESOURCE_STATE_UNORDERED_ACCESS);
+                gpuCmdGlobalBarrier(encoder);
+                if (src.clearType == GPU_GRAPH_CLEAR_UINT) {
+                    uint32_t value[4];
+                    memcpy(value, src.clearUint, sizeof(value));
+                    encoder->rhiEncoder->clearTextureUint(texture, rhi::kEntireTexture, value);
+                } else {
+                    int32_t value[4];
+                    memcpy(value, src.clearSint, sizeof(value));
+                    encoder->rhiEncoder->clearTextureSint(texture, rhi::kEntireTexture, value);
+                }
+                gpuCmdSetTextureState(
+                    graph->device, encoder, handle, GPU_RESOURCE_STATE_RENDER_TARGET);
+                gpuCmdGlobalBarrier(encoder);
+                dst.loadOp = GPU_LOAD_OP_LOAD;
+            } else {
+                memcpy(dst.clearValue, src.clearColor, sizeof(float) * 4);
+            }
         }
 
         GpuRenderPassDepthAttachment depthAtt;

@@ -1514,6 +1514,83 @@ phasec_finish_tests:
     }
     printf("  OK\n"); flush();
 
+    /* C.45 Bit-exact unsigned integer attachment clear */
+    printf("[C.45] Typed uint attachment clear\n"); flush();
+    {
+        GpuDevice clearDevice;
+        GpuDeviceDesc deviceDesc = {
+            .appName = "phaseC_typed_clear",
+            .enableDebugLayer = true,
+            .preferredBackend = GPU_BACKEND_DEFAULT,
+        };
+        CHECK(gpuCreateDevice(&deviceDesc, &clearDevice));
+        GpuCommandQueue clearQueue;
+        CHECK(gpuGetQueue(clearDevice, GPU_QUEUE_TYPE_GRAPHICS, &clearQueue));
+        GpuTextureDesc textureDesc = {
+            .type = GPU_TEXTURE_TYPE_2D,
+            .width = 4,
+            .height = 4,
+            .depth = 1,
+            .arrayLength = 1,
+            .mipCount = 1,
+            .format = GPU_FORMAT_R32_UINT,
+            .sampleCount = 1,
+            .usage = GPU_TEXTURE_USAGE_RENDER_TARGET |
+                     GPU_TEXTURE_USAGE_UNORDERED_ACCESS |
+                     GPU_TEXTURE_USAGE_COPY_SOURCE,
+            .label = "typed_uint_clear",
+        };
+        GpuTextureHandle texture;
+        CHECK(gpuCreateTexture(clearDevice, &textureDesc, &texture));
+        GpuGraph graph;
+        CHECK(gpuGraphCreate(clearDevice, &graph));
+        GpuGraphResource resource = gpuGraphImportTextureEx(
+            graph,
+            texture,
+            GPU_RESOURCE_STATE_UNORDERED_ACCESS,
+            GPU_RESOURCE_STATE_COPY_SOURCE,
+            "typed_uint_clear");
+        GpuGraphPass pass = gpuGraphAddRenderPass(graph, "typed_uint_clear");
+        GpuGraphColorAttachment attachment = {
+            .resource = resource,
+            .loadOp = GPU_LOAD_OP_CLEAR,
+            .storeOp = GPU_STORE_OP_STORE,
+            .clearType = GPU_GRAPH_CLEAR_UINT,
+            .clearUint = {0xffffffffu, 0u, 0u, 0u},
+        };
+        gpuGraphPassSetColorAttachments(pass, 1, &attachment);
+        CHECK(gpuGraphCompile(graph));
+        CHECK(gpuGraphExecute(graph, clearQueue));
+        CHECK(gpuQueueWaitOnHost(clearQueue));
+
+        GpuTextureFootprint footprint = {0};
+        CHECK(gpuGetTextureReadbackFootprint(clearDevice, texture, 0, &footprint));
+        GpuBufferHandle readback;
+        CHECK(gpuCreateReadbackBuffer(clearDevice, footprint.totalSize, &readback));
+        GpuCommandEncoder encoder = gpuBeginCommandEncoder(clearDevice, clearQueue);
+        CHECK_TRUE(encoder != NULL);
+        CHECK(gpuCmdCopyTextureToBuffer(encoder, texture, 0, 0, readback, 0));
+        GpuCommandBuffer commands = gpuFinishCommandEncoder(encoder);
+        CHECK_TRUE(commands != NULL);
+        CHECK(gpuQueueSubmit(clearQueue, 1, &commands));
+        CHECK(gpuQueueWaitOnHost(clearQueue));
+        void* mapped = NULL;
+        CHECK(gpuMapReadbackBuffer(clearDevice, readback, &mapped));
+        for (uint32_t y = 0; y < textureDesc.height; ++y) {
+            const uint32_t* row =
+                (const uint32_t*)((const uint8_t*)mapped + y * footprint.rowPitch);
+            for (uint32_t x = 0; x < textureDesc.width; ++x) {
+                CHECK_TRUE(row[x] == 0xffffffffu);
+            }
+        }
+        gpuUnmapReadbackBuffer(clearDevice, readback);
+        gpuDestroyBuffer(clearDevice, readback);
+        gpuGraphDestroy(graph);
+        gpuDestroyTexture(clearDevice, texture);
+        gpuDestroyDevice(clearDevice);
+    }
+    printf("  OK\n"); flush();
+
     if (isSoftwareVulkanAdapter(device)) {
         printf("\nALL PASSED\n"); flush();
         _exit(0);

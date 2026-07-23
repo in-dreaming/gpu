@@ -94,11 +94,20 @@ void gpuGraphPassWriteSubresource(GpuGraphPass pass, GpuGraphResource resource,
                                   uint32_t mipLevel, uint32_t arrayLayer);
 void gpuGraphPassPresent(GpuGraphPass pass, GpuGraphResource resource);
 
+typedef enum {
+    GPU_GRAPH_CLEAR_FLOAT = 0,
+    GPU_GRAPH_CLEAR_UINT = 1,
+    GPU_GRAPH_CLEAR_SINT = 2,
+} GpuGraphClearValueType;
+
 typedef struct {
     GpuGraphResource resource;
     GpuLoadOp loadOp;
     GpuStoreOp storeOp;
+    GpuGraphClearValueType clearType;
     float clearColor[4];
+    uint32_t clearUint[4];
+    int32_t clearSint[4];
 } GpuGraphColorAttachment;
 
 typedef struct {
