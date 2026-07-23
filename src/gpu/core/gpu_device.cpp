@@ -556,6 +556,40 @@ GpuResult gpuCmdSetBindingData(GpuRenderPassEncoder pass, uint32_t set, uint32_t
     return SLANG_SUCCEEDED(cursor.setData(data, size)) ? GPU_SUCCESS : GPU_ERROR_INTERNAL;
 }
 
+GpuResult gpuCmdSetBindingBuffer(
+    GpuRenderPassEncoder pass,
+    uint32_t set,
+    uint32_t binding,
+    GpuBufferHandle buffer,
+    uint64_t offset,
+    uint64_t range,
+    GpuBufferBindingAccess access)
+{
+    if (!pass || !gpuHandleIsValid(buffer) || access > GPU_BUFFER_BINDING_CONSTANT) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    rhi::IBuffer* resolved = pass->device->bufferPool.resolve(buffer.index, buffer.generation);
+    rhi::ShaderCursor cursor = bindingCursor(pass, set, binding);
+    if (!resolved || !cursor.isValid() || offset > resolved->getDesc().size) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    const auto usage = resolved->getDesc().usage;
+    if ((access == GPU_BUFFER_BINDING_READ &&
+         (usage & rhi::BufferUsage::ShaderResource) == rhi::BufferUsage::None) ||
+        (access == GPU_BUFFER_BINDING_READ_WRITE &&
+         (usage & rhi::BufferUsage::UnorderedAccess) == rhi::BufferUsage::None) ||
+        (access == GPU_BUFFER_BINDING_CONSTANT &&
+         (usage & rhi::BufferUsage::ConstantBuffer) == rhi::BufferUsage::None)) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    const uint64_t resolvedRange = range ? range : resolved->getDesc().size - offset;
+    if (resolvedRange > resolved->getDesc().size - offset) return GPU_ERROR_INVALID_ARGS;
+    return SLANG_SUCCEEDED(cursor.setBinding(
+        rhi::Binding(resolved, rhi::BufferRange{offset, resolvedRange})))
+        ? GPU_SUCCESS
+        : GPU_ERROR_INTERNAL;
+}
+
 GpuResult gpuCmdSetBindingTexture(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, GpuTextureHandle texture)
 {
     if (!pass || !gpuHandleIsValid(texture)) return GPU_ERROR_INVALID_ARGS;
@@ -599,32 +633,206 @@ void gpuCmdDrawIndexed(GpuRenderPassEncoder pass, uint32_t indexCount, uint32_t 
     pass->rhiPassEncoder->drawIndexed(args);
 }
 
+GpuResult gpuCmdDrawIndexedIndirectPass(
+    GpuRenderPassEncoder pass,
+    GpuBufferHandle argumentBuffer,
+    uint64_t argumentOffset,
+    uint32_t maxDrawCount,
+    GpuBufferHandle countBuffer,
+    uint64_t countOffset)
+{
+    if (!pass || !gpuHandleIsValid(argumentBuffer) || maxDrawCount == 0) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    rhi::IBuffer* arguments =
+        pass->device->bufferPool.resolve(argumentBuffer.index, argumentBuffer.generation);
+    const uint64_t drawArgumentSize = 5 * sizeof(uint32_t);
+    if (!arguments ||
+        gpuGetBufferState(pass->device, argumentBuffer) != GPU_RESOURCE_STATE_INDIRECT_ARGUMENT ||
+        argumentOffset > arguments->getDesc().size ||
+        maxDrawCount > (arguments->getDesc().size - argumentOffset) / drawArgumentSize) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    rhi::BufferOffsetPair count = {};
+    if (gpuHandleIsValid(countBuffer)) {
+        rhi::IBuffer* resolvedCount =
+            pass->device->bufferPool.resolve(countBuffer.index, countBuffer.generation);
+        if (!resolvedCount ||
+            gpuGetBufferState(pass->device, countBuffer) != GPU_RESOURCE_STATE_INDIRECT_ARGUMENT ||
+            countOffset > resolvedCount->getDesc().size ||
+            sizeof(uint32_t) > resolvedCount->getDesc().size - countOffset) {
+            return GPU_ERROR_INVALID_ARGS;
+        }
+        count = rhi::BufferOffsetPair(resolvedCount, countOffset);
+    }
+    pass->rhiPassEncoder->drawIndexedIndirect(
+        maxDrawCount,
+        rhi::BufferOffsetPair(arguments, argumentOffset),
+        count);
+    return GPU_SUCCESS;
+}
+
 GpuComputePassEncoder gpuCmdBeginComputePass(GpuCommandEncoder encoder)
 {
     if (!encoder) return nullptr;
     auto* passEncoder = encoder->rhiEncoder->beginComputePass();
     if (!passEncoder) return nullptr;
-    return (GpuComputePassEncoder)passEncoder;
+    GpuComputePassEncoder pass = new GpuComputePassEncoder_t();
+    pass->rhiPassEncoder = passEncoder;
+    pass->device = encoder->device;
+    return pass;
 }
 
 void gpuCmdEndComputePass(GpuComputePassEncoder pass)
 {
     if (!pass) return;
-    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
-    rhiPass->end();
+    pass->rhiPassEncoder->end();
+    delete pass;
 }
 
 void gpuCmdBindComputePipeline(GpuComputePassEncoder pass, GpuComputePipeline pipeline)
 {
     if (!pass || !pipeline) return;
     auto* rhiPipe = static_cast<GpuComputePipeline_t*>(pipeline)->rhiPipeline.get();
-    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
-    rhiPass->bindPipeline(rhiPipe);
+    pass->rootShaderObject = pass->rhiPassEncoder->bindPipeline(rhiPipe);
+}
+
+extern rhi::IComputePipeline* gpuResolveComputePipeline(GpuDevice device, GpuPipelineHandle pipeline);
+
+GpuResult gpuCmdBindComputePipelineHandle(GpuComputePassEncoder pass, GpuPipelineHandle pipeline)
+{
+    if (!pass || !gpuHandleIsValid(pipeline)) return GPU_ERROR_INVALID_ARGS;
+    rhi::IComputePipeline* resolved = gpuResolveComputePipeline(pass->device, pipeline);
+    if (!resolved) return GPU_ERROR_INVALID_ARGS;
+    pass->rootShaderObject = pass->rhiPassEncoder->bindPipeline(resolved);
+    return pass->rootShaderObject ? GPU_SUCCESS : GPU_ERROR_INTERNAL;
+}
+
+static rhi::ShaderCursor computeBindingCursor(
+    GpuComputePassEncoder pass,
+    uint32_t set,
+    uint32_t binding)
+{
+    if (!pass || !pass->rootShaderObject) return {};
+    rhi::ShaderCursor cursor(pass->rootShaderObject);
+    slang::TypeLayoutReflection* layout = cursor.getTypeLayout();
+    if (!layout || layout->getKind() != slang::TypeReflection::Kind::Struct) return {};
+    const SlangInt count = layout->getFieldCount();
+    for (SlangInt index = 0; index < count; ++index) {
+        slang::VariableLayoutReflection* field = layout->getFieldByIndex((unsigned int)index);
+        if (field && field->getBindingSpace() == set && field->getBindingIndex() == binding) {
+            return cursor[(uint32_t)index];
+        }
+    }
+    return {};
+}
+
+GpuResult gpuCmdSetComputeBindingData(
+    GpuComputePassEncoder pass,
+    uint32_t set,
+    uint32_t binding,
+    const void* data,
+    size_t size)
+{
+    if (!data || size == 0) return GPU_ERROR_INVALID_ARGS;
+    rhi::ShaderCursor cursor = computeBindingCursor(pass, set, binding);
+    if (!cursor.isValid()) return GPU_ERROR_INVALID_ARGS;
+    slang::TypeLayoutReflection* type = cursor.getTypeLayout();
+    if (type && (type->getKind() == slang::TypeReflection::Kind::ConstantBuffer ||
+                 type->getKind() == slang::TypeReflection::Kind::ParameterBlock)) {
+        cursor = cursor.getDereferenced();
+        if (!cursor.isValid()) return GPU_ERROR_INTERNAL;
+    }
+    return SLANG_SUCCEEDED(cursor.setData(data, size))
+        ? GPU_SUCCESS
+        : GPU_ERROR_INTERNAL;
+}
+
+GpuResult gpuCmdSetComputeBindingBuffer(
+    GpuComputePassEncoder pass,
+    uint32_t set,
+    uint32_t binding,
+    GpuBufferHandle buffer,
+    uint64_t offset,
+    uint64_t range,
+    GpuBufferBindingAccess access)
+{
+    if (!pass || !gpuHandleIsValid(buffer) || access > GPU_BUFFER_BINDING_CONSTANT) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    rhi::IBuffer* resolved = pass->device->bufferPool.resolve(buffer.index, buffer.generation);
+    rhi::ShaderCursor cursor = computeBindingCursor(pass, set, binding);
+    if (!resolved || !cursor.isValid() || offset > resolved->getDesc().size) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    const auto usage = resolved->getDesc().usage;
+    if ((access == GPU_BUFFER_BINDING_READ &&
+         (usage & rhi::BufferUsage::ShaderResource) == rhi::BufferUsage::None) ||
+        (access == GPU_BUFFER_BINDING_READ_WRITE &&
+         (usage & rhi::BufferUsage::UnorderedAccess) == rhi::BufferUsage::None) ||
+        (access == GPU_BUFFER_BINDING_CONSTANT &&
+         (usage & rhi::BufferUsage::ConstantBuffer) == rhi::BufferUsage::None)) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    const uint64_t resolvedRange = range ? range : resolved->getDesc().size - offset;
+    if (resolvedRange > resolved->getDesc().size - offset) return GPU_ERROR_INVALID_ARGS;
+    return SLANG_SUCCEEDED(cursor.setBinding(
+        rhi::Binding(resolved, rhi::BufferRange{offset, resolvedRange})))
+        ? GPU_SUCCESS
+        : GPU_ERROR_INTERNAL;
+}
+
+GpuResult gpuCmdSetComputeBindingTexture(
+    GpuComputePassEncoder pass,
+    uint32_t set,
+    uint32_t binding,
+    GpuTextureHandle texture)
+{
+    if (!pass || !gpuHandleIsValid(texture)) return GPU_ERROR_INVALID_ARGS;
+    rhi::ITexture* resolved = pass->device->texturePool.resolve(texture.index, texture.generation);
+    rhi::ShaderCursor cursor = computeBindingCursor(pass, set, binding);
+    if (!resolved || !cursor.isValid()) return GPU_ERROR_INVALID_ARGS;
+    return SLANG_SUCCEEDED(cursor.setBinding(rhi::Binding(resolved)))
+        ? GPU_SUCCESS
+        : GPU_ERROR_INTERNAL;
+}
+
+GpuResult gpuCmdSetComputeBindingSampler(
+    GpuComputePassEncoder pass,
+    uint32_t set,
+    uint32_t binding,
+    GpuHandle sampler)
+{
+    if (!pass || !gpuHandleIsValid(sampler)) return GPU_ERROR_INVALID_ARGS;
+    rhi::ISampler* resolved = pass->device->samplerPool.resolve(sampler.index, sampler.generation);
+    rhi::ShaderCursor cursor = computeBindingCursor(pass, set, binding);
+    if (!resolved || !cursor.isValid()) return GPU_ERROR_INVALID_ARGS;
+    return SLANG_SUCCEEDED(cursor.setBinding(rhi::Binding(resolved)))
+        ? GPU_SUCCESS
+        : GPU_ERROR_INTERNAL;
 }
 
 void gpuCmdDispatchCompute(GpuComputePassEncoder pass, uint32_t x, uint32_t y, uint32_t z)
 {
     if (!pass) return;
-    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
-    rhiPass->dispatchCompute(x, y, z);
+    pass->rhiPassEncoder->dispatchCompute(x, y, z);
+}
+
+GpuResult gpuCmdDispatchComputeIndirect(
+    GpuComputePassEncoder pass,
+    GpuBufferHandle argumentBuffer,
+    uint64_t argumentOffset)
+{
+    if (!pass || !gpuHandleIsValid(argumentBuffer)) return GPU_ERROR_INVALID_ARGS;
+    rhi::IBuffer* resolved =
+        pass->device->bufferPool.resolve(argumentBuffer.index, argumentBuffer.generation);
+    if (!resolved ||
+        gpuGetBufferState(pass->device, argumentBuffer) != GPU_RESOURCE_STATE_INDIRECT_ARGUMENT ||
+        argumentOffset > resolved->getDesc().size ||
+        3 * sizeof(uint32_t) > resolved->getDesc().size - argumentOffset) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    pass->rhiPassEncoder->dispatchComputeIndirect(
+        rhi::BufferOffsetPair(resolved, argumentOffset));
+    return GPU_SUCCESS;
 }

@@ -47,6 +47,35 @@ static void noop_pass_callback(GpuGraphPassContext* ctx, void* ud)
     (void)ud;
 }
 
+typedef struct {
+    GpuGraphResource output;
+    GpuGraphResource arguments;
+    GpuPipelineHandle pipeline;
+    GpuResult result;
+} GraphBindingTestData;
+
+static void graph_binding_callback(GpuGraphPassContext* ctx, void* userData)
+{
+    GraphBindingTestData* data = (GraphBindingTestData*)userData;
+    GpuBufferHandle output = GPU_NULL_HANDLE;
+    data->result = gpuGraphPassGetBuffer(ctx, data->output, &output);
+    if (data->result != GPU_SUCCESS) return;
+    data->result = gpuCmdBindComputePipelineHandle(ctx->computePass, data->pipeline);
+    if (data->result != GPU_SUCCESS) return;
+    data->result = gpuCmdSetComputeBindingBuffer(
+        ctx->computePass, 0, 0, output, 0, 4 * sizeof(uint32_t),
+        GPU_BUFFER_BINDING_READ_WRITE);
+    if (data->result != GPU_SUCCESS) return;
+    if (data->arguments != GPU_GRAPH_NULL_RESOURCE) {
+        GpuBufferHandle arguments = GPU_NULL_HANDLE;
+        data->result = gpuGraphPassGetBuffer(ctx, data->arguments, &arguments);
+        if (data->result != GPU_SUCCESS) return;
+        data->result = gpuCmdDispatchComputeIndirect(ctx->computePass, arguments, 0);
+    } else {
+        gpuCmdDispatchCompute(ctx->computePass, 4, 1, 1);
+    }
+}
+
 int main(void)
 {
     printf("=== Phase C: Render Graph Test ===\n\n"); flush();
@@ -1287,8 +1316,175 @@ phasec_finish_tests:
     }
     printf("  OK\n"); flush();
 
-    /* C.41 Imported copy-destination first write is not a graph hazard */
-    printf("[C.41] Imported first-write hazard classification\n"); flush();
+    /* C.42 Graph callback resource binding and unified compute dispatch */
+    printf("[C.42] Graph callback compute resource binding\n"); flush();
+    {
+        GpuDevice bindingDevice;
+        GpuDeviceDesc deviceDesc = {
+            .appName = "phaseC_graph_binding",
+            .enableDebugLayer = true,
+            .preferredBackend = GPU_BACKEND_DEFAULT,
+        };
+        CHECK(gpuCreateDevice(&deviceDesc, &bindingDevice));
+        GpuCommandQueue bindingQueue;
+        CHECK(gpuGetQueue(bindingDevice, GPU_QUEUE_TYPE_GRAPHICS, &bindingQueue));
+        GpuShaderCompiler compiler;
+        CHECK(gpuCreateShaderCompiler(bindingDevice, &compiler));
+        GpuShaderCompileDesc shaderDesc = {
+            .sourcePath = "graph_binding_test.slang",
+            .entryPoint = "computeMain",
+            .fragmentEntryPoint = NULL,
+            .target = GPU_SHADER_TARGET_DXIL,
+        };
+        GpuShaderProgram program = NULL;
+        CHECK(gpuCompileShader(compiler, &shaderDesc, &program));
+        GpuPipelineHandle pipeline = GPU_NULL_HANDLE;
+        CHECK(gpuCreateComputePipelineFromProgram(
+            bindingDevice, program, "graph_binding_compute", &pipeline));
+
+        GpuBufferDesc bufferDesc = {
+            .size = 4 * sizeof(uint32_t),
+            .elementSize = sizeof(uint32_t),
+            .usage = GPU_BUFFER_USAGE_UNORDERED_ACCESS |
+                     GPU_BUFFER_USAGE_COPY_SOURCE,
+            .label = "graph_binding_output",
+        };
+        GpuBufferHandle output;
+        CHECK(gpuCreateBuffer(bindingDevice, &bufferDesc, &output));
+        GpuGraph graph;
+        CHECK(gpuGraphCreate(bindingDevice, &graph));
+        GpuGraphResource outputResource = gpuGraphImportBufferEx(
+            graph,
+            output,
+            GPU_RESOURCE_STATE_UNORDERED_ACCESS,
+            GPU_RESOURCE_STATE_COPY_SOURCE,
+            "graph_binding_output");
+        GpuGraphPass pass = gpuGraphAddComputePass(graph, "graph_binding_compute");
+        gpuGraphPassReadWrite(pass, outputResource);
+        GraphBindingTestData callbackData = {
+            .output = outputResource,
+            .arguments = GPU_GRAPH_NULL_RESOURCE,
+            .pipeline = pipeline,
+            .result = GPU_ERROR_UNKNOWN,
+        };
+        gpuGraphPassSetCallback(pass, graph_binding_callback, &callbackData);
+        CHECK(gpuGraphCompile(graph));
+        CHECK(gpuGraphExecute(graph, bindingQueue));
+        CHECK(gpuQueueWaitOnHost(bindingQueue));
+        CHECK(callbackData.result);
+        CHECK_TRUE(gpuGetBufferState(bindingDevice, output) == GPU_RESOURCE_STATE_COPY_SOURCE);
+
+        uint32_t actual[4] = {0};
+        CHECK(gpuDownloadFromBuffer(bindingDevice, output, actual, sizeof(actual), 0));
+        printf("  C.42 output: %u %u %u %u\n", actual[0], actual[1], actual[2], actual[3]); flush();
+        for (uint32_t i = 0; i < 4; ++i) {
+            CHECK_TRUE(actual[i] == i + 41);
+        }
+
+        gpuGraphDestroy(graph);
+        gpuDestroyBuffer(bindingDevice, output);
+        CHECK(gpuDestroyPipeline(bindingDevice, pipeline));
+        gpuDestroyShaderProgram(program);
+        gpuDestroyShaderCompiler(compiler);
+        gpuDestroyDevice(bindingDevice);
+    }
+    printf("  OK\n"); flush();
+
+    /* C.43 Graph-tracked indirect argument dispatch */
+    printf("[C.43] Graph indirect argument dispatch\n"); flush();
+    {
+        GpuDevice indirectDevice;
+        GpuDeviceDesc deviceDesc = {
+            .appName = "phaseC_graph_indirect",
+            .enableDebugLayer = true,
+            .preferredBackend = GPU_BACKEND_DEFAULT,
+        };
+        CHECK(gpuCreateDevice(&deviceDesc, &indirectDevice));
+        GpuCommandQueue indirectQueue;
+        CHECK(gpuGetQueue(indirectDevice, GPU_QUEUE_TYPE_GRAPHICS, &indirectQueue));
+        GpuShaderCompiler compiler;
+        CHECK(gpuCreateShaderCompiler(indirectDevice, &compiler));
+        GpuShaderCompileDesc shaderDesc = {
+            .sourcePath = "graph_binding_test.slang",
+            .entryPoint = "computeMain",
+            .fragmentEntryPoint = NULL,
+            .target = GPU_SHADER_TARGET_DXIL,
+        };
+        GpuShaderProgram program = NULL;
+        CHECK(gpuCompileShader(compiler, &shaderDesc, &program));
+        GpuPipelineHandle pipeline = GPU_NULL_HANDLE;
+        CHECK(gpuCreateComputePipelineFromProgram(
+            indirectDevice, program, "graph_indirect_compute", &pipeline));
+
+        GpuBufferDesc outputDesc = {
+            .size = 4 * sizeof(uint32_t),
+            .elementSize = sizeof(uint32_t),
+            .usage = GPU_BUFFER_USAGE_UNORDERED_ACCESS |
+                     GPU_BUFFER_USAGE_COPY_SOURCE,
+            .label = "graph_indirect_output",
+        };
+        GpuBufferHandle output;
+        CHECK(gpuCreateBuffer(indirectDevice, &outputDesc, &output));
+        const uint32_t dispatchArguments[3] = {4, 1, 1};
+        GpuBufferDesc argumentDesc = {
+            .size = sizeof(dispatchArguments),
+            .elementSize = sizeof(uint32_t),
+            .usage = GPU_BUFFER_USAGE_INDIRECT_ARGUMENT |
+                     GPU_BUFFER_USAGE_COPY_DEST,
+            .label = "graph_indirect_arguments",
+        };
+        GpuBufferHandle arguments;
+        CHECK(gpuCreateBufferInit(
+            indirectDevice, &argumentDesc, dispatchArguments, &arguments));
+
+        GpuGraph graph;
+        CHECK(gpuGraphCreate(indirectDevice, &graph));
+        GpuGraphResource outputResource = gpuGraphImportBufferEx(
+            graph,
+            output,
+            GPU_RESOURCE_STATE_UNORDERED_ACCESS,
+            GPU_RESOURCE_STATE_COPY_SOURCE,
+            "graph_indirect_output");
+        GpuGraphResource argumentResource = gpuGraphImportBufferEx(
+            graph,
+            arguments,
+            GPU_RESOURCE_STATE_COMMON,
+            GPU_RESOURCE_STATE_INDIRECT_ARGUMENT,
+            "graph_indirect_arguments");
+        GpuGraphPass pass = gpuGraphAddComputePass(graph, "graph_indirect_compute");
+        gpuGraphPassReadWrite(pass, outputResource);
+        gpuGraphPassReadIndirect(pass, argumentResource);
+        GraphBindingTestData callbackData = {
+            .output = outputResource,
+            .arguments = argumentResource,
+            .pipeline = pipeline,
+            .result = GPU_ERROR_UNKNOWN,
+        };
+        gpuGraphPassSetCallback(pass, graph_binding_callback, &callbackData);
+        CHECK(gpuGraphCompile(graph));
+        CHECK(gpuGraphExecute(graph, indirectQueue));
+        CHECK(gpuQueueWaitOnHost(indirectQueue));
+        CHECK(callbackData.result);
+        CHECK_TRUE(gpuGetBufferState(indirectDevice, arguments) == GPU_RESOURCE_STATE_INDIRECT_ARGUMENT);
+
+        uint32_t actual[4] = {0};
+        CHECK(gpuDownloadFromBuffer(indirectDevice, output, actual, sizeof(actual), 0));
+        for (uint32_t i = 0; i < 4; ++i) {
+            CHECK_TRUE(actual[i] == i + 41);
+        }
+
+        gpuGraphDestroy(graph);
+        gpuDestroyBuffer(indirectDevice, arguments);
+        gpuDestroyBuffer(indirectDevice, output);
+        CHECK(gpuDestroyPipeline(indirectDevice, pipeline));
+        gpuDestroyShaderProgram(program);
+        gpuDestroyShaderCompiler(compiler);
+        gpuDestroyDevice(indirectDevice);
+    }
+    printf("  OK\n"); flush();
+
+    /* C.44 Imported copy-destination first write is not a graph hazard */
+    printf("[C.44] Imported first-write hazard classification\n"); flush();
     {
         GpuBufferDesc bdesc = {
             .size = 128, .elementSize = 4,

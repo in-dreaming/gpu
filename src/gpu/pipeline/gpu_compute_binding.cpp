@@ -40,8 +40,7 @@ GpuResult gpuComputeBindingDispatch(GpuComputeBinding binding, GpuComputePassEnc
     rhi::IBuffer* rhiBuf = binding->device->bufferPool.resolve(buffer.index, buffer.generation);
     if (!rhiBuf) return GPU_ERROR_INVALID_ARGS;
 
-    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
-    rhi::IShaderObject* root = rhiPass->bindPipeline(binding->pipeline->rhiPipeline.get());
+    rhi::IShaderObject* root = pass->rhiPassEncoder->bindPipeline(binding->pipeline->rhiPipeline.get());
     if (!root) return GPU_ERROR_INTERNAL;
 
     rhi::ShaderCursor cursor(root);
@@ -49,6 +48,6 @@ GpuResult gpuComputeBindingDispatch(GpuComputeBinding binding, GpuComputePassEnc
     if (!field.isValid()) return GPU_ERROR_INVALID_ARGS;
     if (SLANG_FAILED(field.setBinding(rhi::Binding(rhiBuf)))) return GPU_ERROR_INTERNAL;
 
-    rhiPass->dispatchCompute(x, y, z);
+    pass->rhiPassEncoder->dispatchCompute(x, y, z);
     return GPU_SUCCESS;
 }

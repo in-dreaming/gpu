@@ -25,6 +25,7 @@ typedef enum {
     GPU_RESOURCE_STATE_COPY_SOURCE,
     GPU_RESOURCE_STATE_COPY_DEST,
     GPU_RESOURCE_STATE_STORAGE_BUFFER,
+    GPU_RESOURCE_STATE_INDIRECT_ARGUMENT,
 } GpuResourceState;
 
 void gpuCmdSetBufferState(GpuDevice device, GpuCommandEncoder encoder, GpuBufferHandle buffer, GpuResourceState state);

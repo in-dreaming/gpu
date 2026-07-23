@@ -20,6 +20,7 @@ static rhi::ResourceState gpuResourceStateToRhi(GpuResourceState state)
     case GPU_RESOURCE_STATE_COPY_SOURCE:     return rhi::ResourceState::CopySource;
     case GPU_RESOURCE_STATE_COPY_DEST:       return rhi::ResourceState::CopyDestination;
     case GPU_RESOURCE_STATE_STORAGE_BUFFER:  return rhi::ResourceState::UnorderedAccess;
+    case GPU_RESOURCE_STATE_INDIRECT_ARGUMENT:return rhi::ResourceState::IndirectArgument;
     default:                                 return rhi::ResourceState::Undefined;
     }
 }

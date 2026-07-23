@@ -391,7 +391,9 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     }
 
     outPipeline->index = index;
-    outPipeline->generation = encodeTypeInGeneration(GPU_PIPELINE_TYPE_GRAPHICS, 1);
+    outPipeline->generation = encodeTypeInGeneration(
+        GPU_PIPELINE_TYPE_GRAPHICS,
+        g_renderPipelinePool.slots[index].generation);
 
     return GPU_OK;
 }
@@ -469,7 +471,9 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
     }
 
     outPipeline->index = index;
-    outPipeline->generation = encodeTypeInGeneration(GPU_PIPELINE_TYPE_COMPUTE, 1);
+    outPipeline->generation = encodeTypeInGeneration(
+        GPU_PIPELINE_TYPE_COMPUTE,
+        g_computePipelinePool.slots[index].generation);
 
     return GPU_OK;
 }
@@ -502,9 +506,10 @@ extern "C" GpuResult gpuCreateComputePipelineFromProgram(GpuDevice device, GpuSh
         return GPU_ERROR_OUT_OF_MEMORY;
     }
     
-    uint32_t baseGen = 1;
     outPipeline->index = index;
-    outPipeline->generation = encodeTypeInGeneration(GPU_PIPELINE_TYPE_COMPUTE, baseGen);
+    outPipeline->generation = encodeTypeInGeneration(
+        GPU_PIPELINE_TYPE_COMPUTE,
+        g_computePipelinePool.slots[index].generation);
 
     return GPU_OK;
 }

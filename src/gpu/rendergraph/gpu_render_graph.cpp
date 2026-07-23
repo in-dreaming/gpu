@@ -118,6 +118,7 @@ struct GpuGraph_t {
     std::vector<std::unique_ptr<GpuGraphPass_t>> passes;
     bool compiled;
     std::vector<std::vector<GpuCompiledBarrier>> passBarriers;
+    std::vector<std::vector<GpuCompiledBarrier>> postPassBarriers;
     std::vector<uint32_t> executionOrder;
     GpuGraphExecuteMode executeMode;
     GpuGraphExecuteMode effectiveExecuteMode;
@@ -437,6 +438,7 @@ void gpuGraphReset(GpuGraph graph)
     graph->passes.clear();
     graph->compiled = false;
     graph->passBarriers.clear();
+    graph->postPassBarriers.clear();
     graph->passCopyOps.clear();
     graph->executionOrder.clear();
     graph->effectiveExecuteMode = graph->executeMode;
@@ -637,6 +639,10 @@ void gpuGraphPassReadWrite(GpuGraphPass pass, GpuGraphResource resource)
 {
     addAccess(pass, resource, GPU_GRAPH_ACCESS_READ_WRITE, 0, 0);
 }
+void gpuGraphPassReadIndirect(GpuGraphPass pass, GpuGraphResource resource)
+{
+    addAccess(pass, resource, GPU_GRAPH_ACCESS_INDIRECT, 0, 0);
+}
 
 void gpuGraphPassReadSubresource(GpuGraphPass pass, GpuGraphResource resource,
                                  uint32_t mipLevel, uint32_t arrayLayer)
@@ -704,6 +710,7 @@ static GpuResourceState accessToState(GpuGraphAccess access, GpuGraphResourceKin
                                        GpuGraphPassKind passKind, bool isColorAttachment, bool isDepthAttachment)
 {
     if (access == GPU_GRAPH_ACCESS_PRESENT) return GPU_RESOURCE_STATE_PRESENT;
+    if (access == GPU_GRAPH_ACCESS_INDIRECT) return GPU_RESOURCE_STATE_INDIRECT_ARGUMENT;
     if (isColorAttachment) return GPU_RESOURCE_STATE_RENDER_TARGET;
     if (isDepthAttachment) return GPU_RESOURCE_STATE_DEPTH_WRITE;
     if (passKind == GPU_GRAPH_PASS_COPY) {
@@ -762,7 +769,9 @@ GpuResult gpuGraphCompile(GpuGraph graph)
             if (acc.access == GPU_GRAPH_ACCESS_WRITE || acc.access == GPU_GRAPH_ACCESS_READ_WRITE ||
                 acc.access == GPU_GRAPH_ACCESS_PRESENT)
                 passWrites[ri].insert(passIdx);
-            if (acc.access == GPU_GRAPH_ACCESS_READ || acc.access == GPU_GRAPH_ACCESS_READ_WRITE)
+            if (acc.access == GPU_GRAPH_ACCESS_READ ||
+                acc.access == GPU_GRAPH_ACCESS_READ_WRITE ||
+                acc.access == GPU_GRAPH_ACCESS_INDIRECT)
                 passReads[ri].insert(passIdx);
         }
     }
@@ -773,7 +782,9 @@ GpuResult gpuGraphCompile(GpuGraph graph)
         for (auto& acc : pass.accesses) {
             uint32_t ri = acc.resource - 1;
             if (ri >= resCount) continue;
-            if (acc.access == GPU_GRAPH_ACCESS_READ || acc.access == GPU_GRAPH_ACCESS_READ_WRITE) {
+            if (acc.access == GPU_GRAPH_ACCESS_READ ||
+                acc.access == GPU_GRAPH_ACCESS_READ_WRITE ||
+                acc.access == GPU_GRAPH_ACCESS_INDIRECT) {
                 for (uint32_t w : passWrites[ri]) {
                     if (w != (uint32_t)pi) pass.dependencies.push_back(w);
                 }
@@ -908,6 +919,7 @@ GpuResult gpuGraphCompile(GpuGraph graph)
     realizeAliasedTransientBuffers(graph);
 
     graph->passBarriers.resize(passCount);
+    graph->postPassBarriers.resize(passCount);
     for (auto& res : graph->resources) {
         res.currentState = res.initialState;
         res.lastAccess = gpuAccessFlagsForResourceState(res.initialState);
@@ -917,6 +929,7 @@ GpuResult gpuGraphCompile(GpuGraph graph)
 
     auto graphAccessToFlags = [](GpuGraphAccess access, GpuGraphPassKind passKind) -> GpuAccessFlags {
         if (access == GPU_GRAPH_ACCESS_PRESENT) return GPU_ACCESS_PRESENT;
+        if (access == GPU_GRAPH_ACCESS_INDIRECT) return GPU_ACCESS_INDIRECT;
         if (passKind == GPU_GRAPH_PASS_COPY) {
             if (access == GPU_GRAPH_ACCESS_READ) return GPU_ACCESS_COPY_READ;
             return GPU_ACCESS_COPY_WRITE;
@@ -1059,7 +1072,7 @@ GpuResult gpuGraphCompile(GpuGraph graph)
                 }
             }
             if (lastPi != UINT32_MAX) {
-                pushBarrier(graph->passBarriers[lastPi], res, ri, lastPi, res.finalState,
+                pushBarrier(graph->postPassBarriers[lastPi], res, ri, lastPi, res.finalState,
                             gpuAccessFlagsForResourceState(res.finalState), 0, 0);
             }
         }
@@ -1100,6 +1113,9 @@ GpuResult gpuGraphCompile(GpuGraph graph)
         if (pi < graph->passBarriers.size()) {
             auto& barriers = graph->passBarriers[pi];
             graph->flatBarriers.insert(graph->flatBarriers.end(), barriers.begin(), barriers.end());
+            auto& postBarriers = graph->postPassBarriers[pi];
+            graph->flatBarriers.insert(
+                graph->flatBarriers.end(), postBarriers.begin(), postBarriers.end());
         }
     }
 
@@ -1200,6 +1216,8 @@ static void executeGraphPass(GpuGraph graph, GpuCommandEncoder encoder, GpuQueue
     }
 
     GpuGraphPassContext ctx = {};
+    ctx.graph = graph;
+    ctx.passIndex = pi;
     ctx.encoder = encoder;
 
     if (pass.kind == GPU_GRAPH_PASS_RENDER) {
@@ -1291,6 +1309,7 @@ static GpuResult executeGraphPasses(GpuGraph graph, GpuCommandEncoder encoder, u
 
         emitBarriers(graph, encoder, GPU_QUEUE_TYPE_GRAPHICS, graph->passBarriers[pi]);
         executeGraphPass(graph, encoder, GPU_QUEUE_TYPE_GRAPHICS, pi, profileQueryIndex);
+        emitBarriers(graph, encoder, GPU_QUEUE_TYPE_GRAPHICS, graph->postPassBarriers[pi]);
     }
     return GPU_SUCCESS;
 }
@@ -1323,6 +1342,7 @@ static GpuResult executePassSubmit(GpuGraph graph, GpuCommandQueue queue)
 
         emitBarriers(graph, encoder, GPU_QUEUE_TYPE_GRAPHICS, graph->passBarriers[pi]);
         executeGraphPass(graph, encoder, GPU_QUEUE_TYPE_GRAPHICS, pi, graph->enablePassProfiling ? &profileQueryIndex : nullptr);
+        emitBarriers(graph, encoder, GPU_QUEUE_TYPE_GRAPHICS, graph->postPassBarriers[pi]);
 
         GpuCommandBuffer cmd = gpuFinishCommandEncoder(encoder);
         if (!cmd) return GPU_ERROR_INTERNAL;
@@ -1370,6 +1390,7 @@ static GpuResult executeMultiQueue(GpuGraph graph)
         for (uint32_t pi : seg.passIndices) {
             emitBarriers(graph, encoder, seg.type, graph->passBarriers[pi]);
             executeGraphPass(graph, encoder, seg.type, pi, graph->enablePassProfiling ? &profileQueryIndex : nullptr);
+            emitBarriers(graph, encoder, seg.type, graph->postPassBarriers[pi]);
         }
 
         if (si + 1 < segments.size() && segments[si + 1].type != seg.type) {
@@ -1422,6 +1443,44 @@ GpuBufferHandle gpuGraphGetBuffer(GpuGraph graph, GpuGraphResource resource)
     auto& res = graph->resources[ri];
     if (res.kind != GPU_GRAPH_RESOURCE_BUFFER) return GPU_NULL_HANDLE;
     return res.imported ? res.importedBuffer : res.realizedBuffer;
+}
+
+static bool graphPassDeclaresResource(
+    const GpuGraphPassContext* ctx,
+    GpuGraphResource resource)
+{
+    if (!ctx || !ctx->graph || resource == GPU_GRAPH_NULL_RESOURCE ||
+        ctx->passIndex >= ctx->graph->passes.size()) {
+        return false;
+    }
+    for (const auto& access : ctx->graph->passes[ctx->passIndex]->accesses) {
+        if (access.resource == resource) return true;
+    }
+    return false;
+}
+
+GpuResult gpuGraphPassGetTexture(
+    const GpuGraphPassContext* ctx,
+    GpuGraphResource resource,
+    GpuTextureHandle* outTexture)
+{
+    if (!outTexture || !graphPassDeclaresResource(ctx, resource)) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    *outTexture = gpuGraphGetTexture(ctx->graph, resource);
+    return gpuHandleIsValid(*outTexture) ? GPU_SUCCESS : GPU_ERROR_INVALID_ARGS;
+}
+
+GpuResult gpuGraphPassGetBuffer(
+    const GpuGraphPassContext* ctx,
+    GpuGraphResource resource,
+    GpuBufferHandle* outBuffer)
+{
+    if (!outBuffer || !graphPassDeclaresResource(ctx, resource)) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    *outBuffer = gpuGraphGetBuffer(ctx->graph, resource);
+    return gpuHandleIsValid(*outBuffer) ? GPU_SUCCESS : GPU_ERROR_INVALID_ARGS;
 }
 
 GpuGraphPassKind gpuGraphGetPassKind(GpuGraph graph, uint32_t passIndex)
@@ -1482,7 +1541,8 @@ GpuResult gpuGraphGetResourceLifetime(GpuGraph graph, GpuGraphResource resource,
 uint32_t gpuGraphGetPassBarrierCount(GpuGraph graph, uint32_t passIndex)
 {
     if (!graph || !graph->compiled || passIndex >= graph->passBarriers.size()) return 0;
-    return (uint32_t)graph->passBarriers[passIndex].size();
+    return (uint32_t)(graph->passBarriers[passIndex].size() +
+                      graph->postPassBarriers[passIndex].size());
 }
 
 GpuResult gpuGraphGetPassBarrier(GpuGraph graph, uint32_t passIndex, uint32_t barrierIndex,
@@ -1490,10 +1550,14 @@ GpuResult gpuGraphGetPassBarrier(GpuGraph graph, uint32_t passIndex, uint32_t ba
 {
     if (!graph || !outInfo || !graph->compiled) return GPU_ERROR_INVALID_ARGS;
     if (passIndex >= graph->passBarriers.size()) return GPU_ERROR_INVALID_ARGS;
-    auto& barriers = graph->passBarriers[passIndex];
-    if (barrierIndex >= barriers.size()) return GPU_ERROR_INVALID_ARGS;
-
-    const auto& b = barriers[barrierIndex];
+    const auto& preBarriers = graph->passBarriers[passIndex];
+    const auto& postBarriers = graph->postPassBarriers[passIndex];
+    if (barrierIndex >= preBarriers.size() + postBarriers.size()) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    const auto& b = barrierIndex < preBarriers.size()
+        ? preBarriers[barrierIndex]
+        : postBarriers[barrierIndex - preBarriers.size()];
     outInfo->resourceName = "";
     if (!b.isGlobalBarrier && b.resourceIndex < graph->resources.size())
         outInfo->resourceName = graph->resources[b.resourceIndex].name.c_str();
@@ -1638,7 +1702,7 @@ GpuResult gpuGraphGetPassGpuDurationMs(GpuGraph graph, uint32_t passIndex, float
 
     uint64_t timestamps[2] = {};
     GpuResult result = GPU_ERROR_INTERNAL;
-    for (int attempt = 0; attempt < 32; attempt++) {
+    for (int attempt = 0; attempt < 256; attempt++) {
         result = gpuQueryPoolGetResults(graph->timestampPool, beginQi, 2, timestamps);
         if (result == GPU_SUCCESS && timestamps[1] >= timestamps[0]) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1758,12 +1822,19 @@ static std::string buildGraphJsonString(GpuGraph graph)
             case GPU_GRAPH_ACCESS_WRITE: f << "\"write\""; break;
             case GPU_GRAPH_ACCESS_READ_WRITE: f << "\"readwrite\""; break;
             case GPU_GRAPH_ACCESS_PRESENT: f << "\"present\""; break;
+            case GPU_GRAPH_ACCESS_INDIRECT: f << "\"indirect\""; break;
             }
             f << "}";
         }
         f << "], \"barriers\": [";
         if (i < graph->passBarriers.size()) {
-            auto& barriers = graph->passBarriers[i];
+            std::vector<GpuCompiledBarrier> barriers = graph->passBarriers[i];
+            if (i < graph->postPassBarriers.size()) {
+                barriers.insert(
+                    barriers.end(),
+                    graph->postPassBarriers[i].begin(),
+                    graph->postPassBarriers[i].end());
+            }
             for (size_t b = 0; b < barriers.size(); b++) {
                 if (b > 0) f << ", ";
                 auto& barrier = barriers[b];

@@ -38,9 +38,12 @@ typedef enum {
     GPU_GRAPH_ACCESS_WRITE = 1,
     GPU_GRAPH_ACCESS_READ_WRITE = 2,
     GPU_GRAPH_ACCESS_PRESENT = 3,
+    GPU_GRAPH_ACCESS_INDIRECT = 4,
 } GpuGraphAccess;
 
 typedef struct GpuGraphPassContext {
+    GpuGraph graph;
+    uint32_t passIndex;
     GpuCommandEncoder encoder;
     GpuRenderPassEncoder renderPass;
     GpuComputePassEncoder computePass;
@@ -84,6 +87,7 @@ GpuGraphPass gpuGraphAddCopyPass(GpuGraph graph, const char* name);
 void gpuGraphPassRead(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassWrite(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassReadWrite(GpuGraphPass pass, GpuGraphResource resource);
+void gpuGraphPassReadIndirect(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassReadSubresource(GpuGraphPass pass, GpuGraphResource resource,
                                  uint32_t mipLevel, uint32_t arrayLayer);
 void gpuGraphPassWriteSubresource(GpuGraphPass pass, GpuGraphResource resource,
@@ -122,6 +126,14 @@ GpuResult gpuGraphExecute(GpuGraph graph, GpuCommandQueue queue);
 
 GpuTextureHandle gpuGraphGetTexture(GpuGraph graph, GpuGraphResource resource);
 GpuBufferHandle gpuGraphGetBuffer(GpuGraph graph, GpuGraphResource resource);
+GpuResult gpuGraphPassGetTexture(
+    const GpuGraphPassContext* ctx,
+    GpuGraphResource resource,
+    GpuTextureHandle* outTexture);
+GpuResult gpuGraphPassGetBuffer(
+    const GpuGraphPassContext* ctx,
+    GpuGraphResource resource,
+    GpuBufferHandle* outBuffer);
 
 GpuGraphPassKind gpuGraphGetPassKind(GpuGraph graph, uint32_t passIndex);
 const char* gpuGraphGetPassName(GpuGraph graph, uint32_t passIndex);

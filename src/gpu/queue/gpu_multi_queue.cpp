@@ -307,8 +307,7 @@ void gpuCmdWriteRenderTimestamp(GpuRenderPassEncoder pass, GpuQueryPool pool, ui
 void gpuCmdWriteComputeTimestamp(GpuComputePassEncoder pass, GpuQueryPool pool, uint32_t queryIndex)
 {
     if (!pass || !pool) return;
-    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
-    rhiPass->writeTimestamp(pool->rhiPool, queryIndex);
+    pass->rhiPassEncoder->writeTimestamp(pool->rhiPool, queryIndex);
 }
 
 

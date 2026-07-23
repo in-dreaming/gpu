@@ -19,6 +19,7 @@ typedef uint32_t GpuAccessFlags;
 #define GPU_ACCESS_COPY_READ         (1u << 5)
 #define GPU_ACCESS_COPY_WRITE        (1u << 6)
 #define GPU_ACCESS_PRESENT           (1u << 7)
+#define GPU_ACCESS_INDIRECT          (1u << 8)
 
 typedef struct {
     uint32_t mipLevel;

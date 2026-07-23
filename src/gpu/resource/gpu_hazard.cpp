@@ -22,6 +22,8 @@ GpuAccessFlags gpuAccessFlagsForResourceState(GpuResourceState state)
         return GPU_ACCESS_COPY_WRITE;
     case GPU_RESOURCE_STATE_PRESENT:
         return GPU_ACCESS_PRESENT;
+    case GPU_RESOURCE_STATE_INDIRECT_ARGUMENT:
+        return GPU_ACCESS_INDIRECT;
     default:
         return GPU_ACCESS_NONE;
     }
@@ -35,6 +37,7 @@ GpuResourceState gpuResourceStateForAccessFlags(GpuAccessFlags access, bool isBu
     if (access & GPU_ACCESS_DEPTH_READ) return GPU_RESOURCE_STATE_DEPTH_READ;
     if (access & GPU_ACCESS_COPY_WRITE) return GPU_RESOURCE_STATE_COPY_DEST;
     if (access & GPU_ACCESS_COPY_READ) return GPU_RESOURCE_STATE_COPY_SOURCE;
+    if (access & GPU_ACCESS_INDIRECT) return GPU_RESOURCE_STATE_INDIRECT_ARGUMENT;
     if (access & GPU_ACCESS_SHADER_WRITE) {
         return isBuffer ? GPU_RESOURCE_STATE_UNORDERED_ACCESS : GPU_RESOURCE_STATE_UNORDERED_ACCESS;
     }
@@ -101,6 +104,7 @@ static bool accessAllowed(GpuResourceState state, GpuAccessFlags access)
                state == GPU_RESOURCE_STATE_STORAGE_BUFFER;
     }
     if (access & GPU_ACCESS_COPY_READ) return state == GPU_RESOURCE_STATE_COPY_SOURCE;
+    if (access & GPU_ACCESS_INDIRECT) return state == GPU_RESOURCE_STATE_INDIRECT_ARGUMENT;
     return true;
 }
 

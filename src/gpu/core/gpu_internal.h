@@ -150,6 +150,12 @@ struct GpuRenderPassEncoder_t {
     rhi::RenderState renderState = {};
 };
 
+struct GpuComputePassEncoder_t {
+    rhi::ComPtr<rhi::IComputePassEncoder> rhiPassEncoder;
+    GpuDevice device;
+    rhi::IShaderObject* rootShaderObject = nullptr;
+};
+
 struct GpuRenderPipeline_t {
     rhi::ComPtr<rhi::IRenderPipeline> rhiPipeline;
 };

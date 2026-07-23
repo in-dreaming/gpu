@@ -65,24 +65,21 @@ void gpuCmdInsertRenderDebugMarker(GpuRenderPassEncoder pass, const char* name, 
 void gpuCmdPushComputeDebugGroup(GpuComputePassEncoder pass, const char* name, GpuMarkerColor color)
 {
     if (!pass || !name) return;
-    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
     rhi::MarkerColor c = { color.r, color.g, color.b };
-    rhiPass->pushDebugGroup(name, c);
+    pass->rhiPassEncoder->pushDebugGroup(name, c);
 }
 
 void gpuCmdPopComputeDebugGroup(GpuComputePassEncoder pass)
 {
     if (!pass) return;
-    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
-    rhiPass->popDebugGroup();
+    pass->rhiPassEncoder->popDebugGroup();
 }
 
 void gpuCmdInsertComputeDebugMarker(GpuComputePassEncoder pass, const char* name, GpuMarkerColor color)
 {
     if (!pass || !name) return;
-    auto* rhiPass = reinterpret_cast<rhi::IComputePassEncoder*>(pass);
     rhi::MarkerColor c = { color.r, color.g, color.b };
-    rhiPass->insertDebugMarker(name, c);
+    pass->rhiPassEncoder->insertDebugMarker(name, c);
 }
 
 // ============================================================================
