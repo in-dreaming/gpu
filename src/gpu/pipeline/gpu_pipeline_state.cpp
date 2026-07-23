@@ -388,10 +388,17 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     rhiDesc.multisample.sampleCount = desc->sampleCount > 0 ? desc->sampleCount : 1;
 
     rhi::ComPtr<rhi::IRenderPipeline> rhiPipeline;
+    {
+        std::lock_guard<std::mutex> lock(device->debugMutex);
+        device->lastError.clear();
+    }
     rhi::Result r = device->rhiDevice->createRenderPipeline(rhiDesc, rhiPipeline.writeRef());
 
     if (SLANG_FAILED(r)) {
-        device->lastError = "graphics render pipeline creation failed";
+        std::lock_guard<std::mutex> lock(device->debugMutex);
+        if (device->lastError.empty()) {
+            device->lastError = "graphics render pipeline creation failed";
+        }
         return GPU_ERROR_UNKNOWN;
     }
 

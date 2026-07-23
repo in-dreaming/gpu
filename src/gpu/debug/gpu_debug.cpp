@@ -11,47 +11,44 @@
 // RHI Debug Callback bridge — forwards driver/layer messages to user callback
 // ============================================================================
 
-class GpuRhiDebugCallback : public rhi::IDebugCallback
+GpuRhiDebugCallback::GpuRhiDebugCallback(GpuDevice device)
+    : m_device(device)
+{}
+
+void SLANG_MCALL GpuRhiDebugCallback::handleMessage(
+    rhi::DebugMessageType type,
+    rhi::DebugMessageSource source,
+    const char* message)
 {
-public:
-    GpuDevice m_device = nullptr;
+    if (!m_device || !message) return;
 
-    GpuRhiDebugCallback(GpuDevice device) : m_device(device) {}
+    GpuDebugLevel level = GPU_DEBUG_LEVEL_INFO;
+    if (type == rhi::DebugMessageType::Error) level = GPU_DEBUG_LEVEL_ERROR;
+    else if (type == rhi::DebugMessageType::Warning) level = GPU_DEBUG_LEVEL_WARNING;
 
-    virtual void SLANG_MCALL handleMessage(
-        rhi::DebugMessageType type,
-        rhi::DebugMessageSource source,
-        const char* message) override
+    if (type == rhi::DebugMessageType::Error || type == rhi::DebugMessageType::Warning) {
+        GpuValidationSeverity severity = (type == rhi::DebugMessageType::Error)
+            ? GPU_VALIDATION_SEVERITY_ERROR
+            : GPU_VALIDATION_SEVERITY_WARNING;
+        gpuEmitValidation(m_device, severity, "RHI_DEBUG", message, nullptr, "RHI", nullptr, 0);
+    }
+
+    void (*callback)(GpuDebugLevel, const char*, void*) = nullptr;
+    void* userData = nullptr;
     {
-        if (!m_device || !message) return;
-
-        GpuDebugLevel level = GPU_DEBUG_LEVEL_INFO;
-        if (type == rhi::DebugMessageType::Error) level = GPU_DEBUG_LEVEL_ERROR;
-        else if (type == rhi::DebugMessageType::Warning) level = GPU_DEBUG_LEVEL_WARNING;
-
-        // Forward to user debug callback
         std::lock_guard<std::mutex> lock(m_device->debugMutex);
-        if (m_device->debugCallback) {
-            char sourceMsg[256];
-            const char* srcStr = (source == rhi::DebugMessageSource::Layer) ? "Layer"
+        callback = m_device->debugCallback;
+        userData = m_device->debugUserData;
+    }
+    if (callback) {
+        char sourceMessage[1024];
+        const char* sourceName = (source == rhi::DebugMessageSource::Layer) ? "Layer"
                                : (source == rhi::DebugMessageSource::Driver) ? "Driver"
                                : "Slang";
-            snprintf(sourceMsg, sizeof(sourceMsg), "[%s] %s", srcStr, message);
-            m_device->debugCallback(level, sourceMsg, m_device->debugUserData);
-        }
-
-        // Also emit as validation if severity is error/warning
-        if (type == rhi::DebugMessageType::Error || type == rhi::DebugMessageType::Warning) {
-            GpuValidationSeverity sev = (type == rhi::DebugMessageType::Error)
-                ? GPU_VALIDATION_SEVERITY_ERROR : GPU_VALIDATION_SEVERITY_WARNING;
-            gpuEmitValidation(m_device, sev, "RHI_DEBUG", message, nullptr, "RHI", nullptr, 0);
-        }
+        snprintf(sourceMessage, sizeof(sourceMessage), "[%s] %s", sourceName, message);
+        callback(level, sourceMessage, userData);
     }
-};
-
-// One callback per device (created lazily)
-static std::map<GpuDevice, rhi::ComPtr<GpuRhiDebugCallback>> s_rhiCallbacks;
-static std::mutex s_rhiCallbackMutex;
+}
 
 // ============================================================================
 // Public API
@@ -75,18 +72,6 @@ void gpuSetDebugCallback(GpuDevice device, void (*callback)(GpuDebugLevel, const
         device->debugUserData = userData;
     }
 
-    // Wire the RHI debug callback to receive driver/layer messages
-    if (callback) {
-        std::lock_guard<std::mutex> cbLock(s_rhiCallbackMutex);
-        auto it = s_rhiCallbacks.find(device);
-        if (it == s_rhiCallbacks.end()) {
-            auto* rhiCb = new GpuRhiDebugCallback(device);
-            s_rhiCallbacks[device] = rhiCb;
-            // Note: slang-rhi DeviceDesc.debugCallback is set at device creation time.
-            // For existing devices, we can't retroactively add it. But the callback
-            // object is stored and can be used if the device was created with it.
-        }
-    }
 }
 
 const char* gpuGetLastError(void)
@@ -126,10 +111,18 @@ void gpuEmitValidation(GpuDevice device, GpuValidationSeverity severity, const c
 {
     if (!device || !message) return;
 
-    std::lock_guard<std::mutex> lock(device->debugMutex);
-    device->lastError = message;
+    GpuValidationCallback validationCallback = nullptr;
+    void* validationUserData = nullptr;
+    GpuDebugLevel debugLevel = GPU_DEBUG_LEVEL_NONE;
+    {
+        std::lock_guard<std::mutex> lock(device->debugMutex);
+        device->lastError = message;
+        validationCallback = device->validationCallback;
+        validationUserData = device->validationUserData;
+        debugLevel = device->debugLevel;
+    }
 
-    if (device->validationCallback) {
+    if (validationCallback) {
         GpuValidationMessage msg = {};
         msg.severity = severity;
         msg.messageId = messageId;
@@ -138,10 +131,10 @@ void gpuEmitValidation(GpuDevice device, GpuValidationSeverity severity, const c
         msg.function = function;
         msg.file = file;
         msg.line = line;
-        device->validationCallback(&msg, device->validationUserData);
+        validationCallback(&msg, validationUserData);
     }
 
-    if (device->debugLevel >= GPU_DEBUG_LEVEL_ERROR) {
+    if (debugLevel >= GPU_DEBUG_LEVEL_ERROR) {
         const char* sevStr = (severity == GPU_VALIDATION_SEVERITY_ERROR) ? "ERROR"
                            : (severity == GPU_VALIDATION_SEVERITY_WARNING) ? "WARNING"
                            : "INFO";

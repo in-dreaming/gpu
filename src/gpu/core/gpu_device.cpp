@@ -20,8 +20,12 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
 {
     if (!desc || !outDevice) return GPU_ERROR_INVALID_ARGS;
 
+    GpuDevice device = new GpuDevice_t();
+    device->rhiDebugCallback = new GpuRhiDebugCallback(device);
+
     rhi::DeviceDesc rhiDesc = {};
     rhiDesc.enableValidation = desc->enableDebugLayer;
+    rhiDesc.debugCallback = device->rhiDebugCallback;
     // Bindless descriptor handles require SM 6.6 on D3D12; let slang-rhi pick the highest supported profile.
     rhiDesc.slang.targetProfile = nullptr;
     rhiDesc.bindless.textureCount = 4096;
@@ -66,9 +70,11 @@ GpuResult gpuCreateDevice(const GpuDeviceDesc* desc, GpuDevice* outDevice)
         break;
     }
 
-    if (!created) return GPU_ERROR_DEVICE_LOST;
+    if (!created) {
+        delete device;
+        return GPU_ERROR_DEVICE_LOST;
+    }
 
-    GpuDevice device = new GpuDevice_t();
     device->rhiDevice = rhiDevice;
 
     rhi::ComPtr<rhi::ICommandQueue> queue;
@@ -170,6 +176,7 @@ void gpuDestroyDevice(GpuDevice device)
     device->computeQueue = nullptr;
     device->transferQueue = nullptr;
     device->rhiDevice = nullptr;
+    device->rhiDebugCallback = nullptr;
     delete device;
 }
 

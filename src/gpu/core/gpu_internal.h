@@ -37,7 +37,21 @@ struct GpuPooledTransientBuffer {
 struct GpuSubresourceStateRecord_t;
 typedef GpuSubresourceStateRecord_t* GpuSubresourceTracker;
 
+class GpuRhiDebugCallback : public rhi::IDebugCallback {
+public:
+    explicit GpuRhiDebugCallback(GpuDevice device);
+
+    void SLANG_MCALL handleMessage(
+        rhi::DebugMessageType type,
+        rhi::DebugMessageSource source,
+        const char* message) override;
+
+private:
+    GpuDevice m_device;
+};
+
 struct GpuDevice_t {
+    rhi::ComPtr<rhi::IDebugCallback> rhiDebugCallback;
     rhi::ComPtr<rhi::IDevice> rhiDevice;
     rhi::ComPtr<rhi::ICommandQueue> graphicsQueue;
     rhi::ComPtr<rhi::ICommandQueue> computeQueue;
