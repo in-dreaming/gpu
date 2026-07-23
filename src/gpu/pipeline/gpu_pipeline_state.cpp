@@ -229,8 +229,18 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
             programDesc.linkingStyle = rhi::LinkingStyle::SeparateEntryPointCompilation;
             programDesc.precompiledEntryPointCode = precompiledCode.data();
             programDesc.precompiledEntryPointCodeCount = (uint32_t)precompiledCode.size();
-            if (SLANG_FAILED(device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef()))) {
-                device->lastError = "graphics pipeline could not create precompiled shader program";
+            rhi::ComPtr<ISlangBlob> programDiagnostics;
+            const rhi::Result programResult = device->rhiDevice->createShaderProgram(
+                programDesc, rhiProgram.writeRef(), programDiagnostics.writeRef());
+            if (SLANG_FAILED(programResult)) {
+                device->lastError = "graphics pipeline could not create precompiled shader program (result " +
+                    std::to_string((int)programResult) + ")";
+                if (programDiagnostics && programDiagnostics->getBufferPointer()) {
+                    device->lastError += ": ";
+                    device->lastError.append(
+                        (const char*)programDiagnostics->getBufferPointer(),
+                        programDiagnostics->getBufferSize());
+                }
                 return GPU_ERROR_INVALID_PARAMETER;
             }
         } else {
