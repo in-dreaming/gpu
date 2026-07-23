@@ -1,5 +1,7 @@
 #include "gpu/resource/gpu_readback.h"
 #include "gpu/core/gpu_internal.h"
+#include "gpu/resource/gpu_barrier.h"
+#include <algorithm>
 
 // D3D12 minimum row pitch alignment is 256 bytes
 #define GPU_MIN_ROW_PITCH_ALIGNMENT 256
@@ -21,6 +23,7 @@ static uint32_t getFormatBytesPerPixel(rhi::Format format)
     case rhi::Format::R16Uint:
     case rhi::Format::R16Sint:
     case rhi::Format::R16Float:
+    case rhi::Format::D16Unorm:
         return 2;
     case rhi::Format::RGBA8Unorm:
     case rhi::Format::RGBA8UnormSrgb:
@@ -38,7 +41,6 @@ static uint32_t getFormatBytesPerPixel(rhi::Format format)
     case rhi::Format::R32Sint:
     case rhi::Format::R32Float:
     case rhi::Format::R11G11B10Float:
-    case rhi::Format::D16Unorm:
     case rhi::Format::D32Float:
         return 4;
     case rhi::Format::RGBA16Unorm:
@@ -58,6 +60,15 @@ static uint32_t getFormatBytesPerPixel(rhi::Format format)
     default:
         return 4;  // safe default
     }
+}
+
+static GpuFormat getGpuFormat(rhi::Format format)
+{
+    for (int value = GPU_FORMAT_R8_UINT; value <= GPU_FORMAT_R11G11B10_FLOAT; ++value) {
+        const GpuFormat candidate = static_cast<GpuFormat>(value);
+        if (gpuFormatToRhi(candidate) == format) return candidate;
+    }
+    return GPU_FORMAT_UNDEFINED;
 }
 
 static uint32_t alignTo(uint32_t value, uint32_t alignment)
@@ -102,15 +113,26 @@ GpuResult gpuCmdCopyTextureToBuffer(GpuCommandEncoder encoder,
 
     const auto& texDesc = rhiSrc->getDesc();
     const auto& sz = texDesc.size;
+    if (srcMip >= texDesc.mipCount || srcSlice >= texDesc.arrayLength) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    const uint32_t width = std::max(1u, sz.width >> srcMip);
+    const uint32_t height = std::max(1u, sz.height >> srcMip);
+    const uint32_t depth = std::max(1u, sz.depth >> srcMip);
 
     // Compute proper row pitch with alignment
     uint32_t bpp = getFormatBytesPerPixel(texDesc.format);
-    uint32_t rowPitch = alignTo(sz.width * bpp, GPU_MIN_ROW_PITCH_ALIGNMENT);
-    uint32_t slicePitch = rowPitch * sz.height;
-    uint64_t totalSize = (uint64_t)slicePitch * sz.depth;
+    uint32_t rowPitch = alignTo(width * bpp, GPU_MIN_ROW_PITCH_ALIGNMENT);
+    uint32_t slicePitch = rowPitch * height;
+    uint64_t totalSize = (uint64_t)slicePitch * depth;
+    if (dstOffset > rhiDst->getDesc().size ||
+        totalSize > rhiDst->getDesc().size - dstOffset) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
 
     // Insert resource barriers: transition texture to CopySource, buffer to CopyDestination
-    encoder->rhiEncoder->setTextureState(rhiSrc, rhi::kEntireTexture, rhi::ResourceState::CopySource);
+    const GpuResourceState originalState = encoder->device->textureStates[src.index];
+    gpuCmdSetTextureState(encoder->device, encoder, src, GPU_RESOURCE_STATE_COPY_SOURCE);
     encoder->rhiEncoder->setBufferState(rhiDst, rhi::ResourceState::CopyDestination);
     encoder->rhiEncoder->globalBarrier();
 
@@ -119,14 +141,49 @@ GpuResult gpuCmdCopyTextureToBuffer(GpuCommandEncoder encoder,
         rhiDst, dstOffset, totalSize, rowPitch,
         rhiSrc, srcSlice, srcMip,
         {0, 0, 0},
-        {sz.width, sz.height, sz.depth}
+        {width, height, depth}
     );
 
-    // Transition texture back to RenderTarget (common state after render pass)
-    encoder->rhiEncoder->setTextureState(rhiSrc, rhi::kEntireTexture, rhi::ResourceState::RenderTarget);
+    // Restore the caller-visible resource state.
+    gpuCmdSetTextureState(encoder->device, encoder, src, originalState);
     encoder->rhiEncoder->globalBarrier();
 
     return GPU_SUCCESS;
+}
+
+GpuResult gpuGetTextureReadbackFootprint(
+    GpuDevice device,
+    GpuTextureHandle texture,
+    uint32_t mipLevel,
+    GpuTextureFootprint* outFootprint)
+{
+    if (!device || !gpuHandleIsValid(texture) || !outFootprint) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+    rhi::ITexture* rhiTexture =
+        device->texturePool.resolve(texture.index, texture.generation);
+    if (!rhiTexture) return GPU_ERROR_INVALID_ARGS;
+    const auto& desc = rhiTexture->getDesc();
+    if (mipLevel >= desc.mipCount) return GPU_ERROR_INVALID_ARGS;
+
+    const uint32_t width = std::max(1u, desc.size.width >> mipLevel);
+    const uint32_t height = std::max(1u, desc.size.height >> mipLevel);
+    const uint32_t depth = std::max(1u, desc.size.depth >> mipLevel);
+    const uint32_t rowPitch =
+        alignTo(width * getFormatBytesPerPixel(desc.format), GPU_MIN_ROW_PITCH_ALIGNMENT);
+    const uint32_t slicePitch = rowPitch * height;
+    *outFootprint = {
+        getGpuFormat(desc.format),
+        width,
+        height,
+        depth,
+        rowPitch,
+        slicePitch,
+        (uint64_t)slicePitch * depth,
+    };
+    return outFootprint->format == GPU_FORMAT_UNDEFINED
+        ? GPU_ERROR_NOT_SUPPORTED
+        : GPU_SUCCESS;
 }
 
 GpuResult gpuMapReadbackBuffer(GpuDevice device, GpuBufferHandle handle, void** outPtr)
@@ -149,10 +206,8 @@ void gpuUnmapReadbackBuffer(GpuDevice device, GpuBufferHandle handle)
 // Helper: get the row pitch for a texture format (useful for reading readback data)
 uint32_t gpuGetReadbackRowPitch(GpuTextureHandle texture, GpuDevice device)
 {
-    if (!device || texture.index == 0) return 0;
-    rhi::ITexture* rhiTex = device->texturePool.resolve(texture.index, texture.generation);
-    if (!rhiTex) return 0;
-    const auto& desc = rhiTex->getDesc();
-    uint32_t bpp = getFormatBytesPerPixel(desc.format);
-    return alignTo(desc.size.width * bpp, GPU_MIN_ROW_PITCH_ALIGNMENT);
+    GpuTextureFootprint footprint = {};
+    return gpuGetTextureReadbackFootprint(device, texture, 0, &footprint) == GPU_SUCCESS
+        ? footprint.rowPitch
+        : 0;
 }

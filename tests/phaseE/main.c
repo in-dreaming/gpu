@@ -811,6 +811,104 @@ int main(void)
     }
     printf("  OK\n"); flush();
 
+    // =========================================================================
+    // [E.15] Typed texture upload and readback footprints
+    // =========================================================================
+    printf("[E.15] Typed texture upload/readback footprints\n"); flush();
+    {
+        GpuDevice device;
+        GpuDeviceDesc devDesc = {
+            .appName = "phaseE_typed_texture_io",
+            .enableDebugLayer = true,
+            .preferredBackend = GPU_BACKEND_DEFAULT,
+        };
+        CHECK(gpuCreateDevice(&devDesc, &device));
+        GpuCommandQueue queue;
+        CHECK(gpuGetQueue(device, GPU_QUEUE_TYPE_GRAPHICS, &queue));
+
+        const GpuFormat formats[] = {
+            GPU_FORMAT_RGBA16_FLOAT,
+            GPU_FORMAT_RG16_FLOAT,
+        };
+        const uint32_t widths[] = { 3, 5 };
+        const uint32_t heights[] = { 2, 3 };
+        const uint32_t channels[] = { 4, 2 };
+        for (uint32_t caseIndex = 0; caseIndex < 2; ++caseIndex) {
+            const uint32_t valueCount =
+                widths[caseIndex] * heights[caseIndex] * channels[caseIndex];
+            uint16_t source[64] = {0};
+            for (uint32_t i = 0; i < valueCount; ++i) {
+                source[i] = (uint16_t)(0x3000u + i);
+            }
+
+            GpuTextureDesc desc = {
+                .type = GPU_TEXTURE_TYPE_2D,
+                .width = widths[caseIndex],
+                .height = heights[caseIndex],
+                .depth = 1,
+                .arrayLength = 1,
+                .mipCount = 1,
+                .format = formats[caseIndex],
+                .sampleCount = 1,
+                .usage = GPU_TEXTURE_USAGE_SHADER_RESOURCE |
+                         GPU_TEXTURE_USAGE_COPY_SOURCE |
+                         GPU_TEXTURE_USAGE_COPY_DEST,
+                .label = "phaseE_typed_texture",
+            };
+            GpuTextureHandle texture;
+            CHECK(gpuCreateTexture(device, &desc, &texture));
+
+            const uint32_t tightRowPitch =
+                widths[caseIndex] * channels[caseIndex] * sizeof(uint16_t);
+            GpuTextureUploadDesc upload = {
+                .data = source,
+                .dataSize = valueCount * sizeof(uint16_t),
+                .rowPitch = tightRowPitch,
+                .slicePitch = tightRowPitch * heights[caseIndex],
+                .mipLevel = 0,
+                .arrayLayer = 0,
+            };
+            CHECK(gpuUploadTextureData(device, texture, &upload));
+            CHECK_TRUE(gpuGetTextureState(device, texture) == GPU_RESOURCE_STATE_SHADER_RESOURCE);
+
+            GpuTextureFootprint footprint = {0};
+            CHECK(gpuGetTextureReadbackFootprint(device, texture, 0, &footprint));
+            CHECK_TRUE(footprint.format == formats[caseIndex]);
+            CHECK_TRUE(footprint.width == widths[caseIndex]);
+            CHECK_TRUE(footprint.height == heights[caseIndex]);
+            CHECK_TRUE(footprint.depth == 1);
+            CHECK_TRUE(footprint.rowPitch == 256);
+            CHECK_TRUE(footprint.slicePitch == footprint.rowPitch * footprint.height);
+            CHECK_TRUE(footprint.totalSize == footprint.slicePitch);
+
+            GpuBufferHandle readback;
+            CHECK(gpuCreateReadbackBuffer(device, footprint.totalSize, &readback));
+            GpuCommandEncoder encoder = gpuBeginCommandEncoder(device, queue);
+            CHECK_TRUE(encoder != NULL);
+            CHECK(gpuCmdCopyTextureToBuffer(encoder, texture, 0, 0, readback, 0));
+            GpuCommandBuffer commands = gpuFinishCommandEncoder(encoder);
+            CHECK_TRUE(commands != NULL);
+            CHECK(gpuQueueSubmit(queue, 1, &commands));
+            CHECK(gpuQueueWaitOnHost(queue));
+            CHECK_TRUE(gpuGetTextureState(device, texture) == GPU_RESOURCE_STATE_SHADER_RESOURCE);
+
+            void* mapped = NULL;
+            CHECK(gpuMapReadbackBuffer(device, readback, &mapped));
+            for (uint32_t y = 0; y < heights[caseIndex]; ++y) {
+                const uint16_t* actual =
+                    (const uint16_t*)((const uint8_t*)mapped + y * footprint.rowPitch);
+                const uint16_t* expected =
+                    source + y * widths[caseIndex] * channels[caseIndex];
+                CHECK_TRUE(memcmp(actual, expected, tightRowPitch) == 0);
+            }
+            gpuUnmapReadbackBuffer(device, readback);
+            gpuDestroyBuffer(device, readback);
+            gpuDestroyTexture(device, texture);
+        }
+        gpuDestroyDevice(device);
+    }
+    printf("  OK\n"); flush();
+
     printf("\nALL PASSED\n"); flush();
     return 0;
 }

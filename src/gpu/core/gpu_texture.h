@@ -55,8 +55,21 @@ typedef struct {
     uint32_t layerCount;
 } GpuTextureSubresourceRange;
 
+typedef struct {
+    const void* data;
+    uint64_t dataSize;
+    uint32_t rowPitch;
+    uint32_t slicePitch;
+    uint32_t mipLevel;
+    uint32_t arrayLayer;
+} GpuTextureUploadDesc;
+
 GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuTextureHandle* outHandle);
 GpuResult gpuDestroyTexture(GpuDevice device, GpuTextureHandle handle);
+GpuResult gpuUploadTextureData(
+    GpuDevice device,
+    GpuTextureHandle texture,
+    const GpuTextureUploadDesc* upload);
 
 // Create a texture view for a specific usage (e.g., render target)
 GpuResult gpuCreateTextureView(GpuDevice device, GpuTextureHandle texture, GpuTextureViewType type, GpuTextureHandle* outViewHandle);

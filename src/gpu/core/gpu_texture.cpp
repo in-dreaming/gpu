@@ -1,8 +1,11 @@
 ﻿#include "gpu/core/gpu_texture.h"
 #include "gpu/core/gpu_device.h"
+#include "gpu/core/gpu_command.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/debug/gpu_validation.h"
 #include "gpu/resource/gpu_frame_context.h"
+#include "gpu/resource/gpu_readback.h"
+#include "gpu/resource/gpu_barrier.h"
 #include "gpu/bindless/gpu_bindless_heap.h"
 
 static GpuResourceState gpuDefaultTextureState(GpuTextureUsage usage)
@@ -74,6 +77,82 @@ GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuText
     outHandle->generation = device->texturePool.slots[idx].generation;
     device->textureStates[idx] = gpuDefaultTextureState(desc->usage);
     return GPU_SUCCESS;
+}
+
+GpuResult gpuUploadTextureData(
+    GpuDevice device,
+    GpuTextureHandle texture,
+    const GpuTextureUploadDesc* upload)
+{
+    if (!device || !gpuHandleIsValid(texture) || !upload || !upload->data) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+
+    rhi::ITexture* rhiTexture = device->texturePool.resolve(texture.index, texture.generation);
+    if (!rhiTexture) return GPU_ERROR_INVALID_ARGS;
+    const auto& textureDesc = rhiTexture->getDesc();
+    if (upload->mipLevel >= textureDesc.mipCount ||
+        upload->arrayLayer >= textureDesc.arrayLength) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+
+    GpuTextureFootprint footprint = {};
+    GpuResult footprintResult =
+        gpuGetTextureReadbackFootprint(device, texture, upload->mipLevel, &footprint);
+    if (footprintResult != GPU_SUCCESS) return footprintResult;
+    const uint32_t bytesPerPixel =
+        rhi::getFormatInfo(textureDesc.format).blockSizeInBytes;
+    if (bytesPerPixel == 0) return GPU_ERROR_NOT_SUPPORTED;
+    const uint32_t minimumRowPitch = footprint.width * bytesPerPixel;
+    const uint32_t sourceRowPitch = upload->rowPitch ? upload->rowPitch : minimumRowPitch;
+    const uint32_t sourceSlicePitch =
+        upload->slicePitch ? upload->slicePitch : sourceRowPitch * footprint.height;
+    if (sourceRowPitch < minimumRowPitch ||
+        sourceSlicePitch < sourceRowPitch * footprint.height ||
+        upload->dataSize < (uint64_t)sourceSlicePitch * footprint.depth) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+
+    GpuCommandQueue queue = nullptr;
+    if (gpuGetQueue(device, GPU_QUEUE_TYPE_GRAPHICS, &queue) != GPU_SUCCESS) {
+        return GPU_ERROR_INTERNAL;
+    }
+    GpuCommandEncoder encoder = gpuBeginCommandEncoder(device, queue);
+    if (!encoder) return GPU_ERROR_INTERNAL;
+
+    const GpuResourceState originalState = device->textureStates[texture.index];
+    gpuCmdSetTextureState(device, encoder, texture, GPU_RESOURCE_STATE_COPY_DEST);
+    gpuCmdGlobalBarrier(encoder);
+
+    rhi::SubresourceRange range = {};
+    range.mip = upload->mipLevel;
+    range.mipCount = 1;
+    range.layer = upload->arrayLayer;
+    range.layerCount = 1;
+    rhi::SubresourceData data = {};
+    data.data = upload->data;
+    data.rowPitch = sourceRowPitch;
+    data.slicePitch = sourceSlicePitch;
+    const rhi::Result uploadResult = encoder->rhiEncoder->uploadTextureData(
+        rhiTexture,
+        range,
+        {0, 0, 0},
+        {footprint.width, footprint.height, footprint.depth},
+        &data,
+        1);
+    if (SLANG_FAILED(uploadResult)) {
+        device->textureStates[texture.index] = originalState;
+        gpuCancelCommandEncoder(encoder);
+        return GPU_ERROR_INTERNAL;
+    }
+
+    gpuCmdSetTextureState(device, encoder, texture, originalState);
+    gpuCmdGlobalBarrier(encoder);
+    GpuCommandBuffer commands = gpuFinishCommandEncoder(encoder);
+    if (!commands) return GPU_ERROR_INTERNAL;
+    GpuResult result = gpuQueueSubmit(queue, 1, &commands);
+    if (result != GPU_SUCCESS) return result;
+    return gpuQueueWaitOnHost(queue);
 }
 
 GpuResult gpuDestroyTexture(GpuDevice device, GpuTextureHandle handle)
