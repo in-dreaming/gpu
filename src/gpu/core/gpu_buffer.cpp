@@ -142,7 +142,8 @@ GpuResult gpuUploadToBuffer(GpuDevice device, GpuBufferHandle buffer, const void
     if (!buf) return GPU_ERROR_INVALID_ARGS;
 
     void* mappedData = nullptr;
-    if (SLANG_SUCCEEDED(device->rhiDevice->mapBuffer(buf, rhi::CpuAccessMode::Write, &mappedData))) {
+    if (buf->getDesc().memoryType != rhi::MemoryType::DeviceLocal &&
+        SLANG_SUCCEEDED(device->rhiDevice->mapBuffer(buf, rhi::CpuAccessMode::Write, &mappedData))) {
         memcpy(static_cast<uint8_t*>(mappedData) + offset, data, size);
         device->rhiDevice->unmapBuffer(buf);
         return GPU_SUCCESS;
@@ -172,7 +173,8 @@ GpuResult gpuDownloadFromBuffer(GpuDevice device, GpuBufferHandle buffer, void* 
     if (!buf) return GPU_ERROR_INVALID_ARGS;
 
     void* mappedData = nullptr;
-    if (SLANG_SUCCEEDED(device->rhiDevice->mapBuffer(buf, rhi::CpuAccessMode::Read, &mappedData))) {
+    if (buf->getDesc().memoryType == rhi::MemoryType::ReadBack &&
+        SLANG_SUCCEEDED(device->rhiDevice->mapBuffer(buf, rhi::CpuAccessMode::Read, &mappedData))) {
         memcpy(outData, static_cast<uint8_t*>(mappedData) + offset, size);
         device->rhiDevice->unmapBuffer(buf);
         return GPU_SUCCESS;

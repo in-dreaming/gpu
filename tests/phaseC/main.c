@@ -25,6 +25,16 @@
 
 static void flush(void) { fflush(stdout); fflush(stderr); }
 
+static GpuBackend testBackend(void)
+{
+    const char* value = getenv("GPU_TEST_BACKEND");
+    if (!value || !value[0] || strcmp(value, "default") == 0) return GPU_BACKEND_DEFAULT;
+    if (strcmp(value, "d3d12") == 0) return GPU_BACKEND_D3D12;
+    if (strcmp(value, "vulkan") == 0) return GPU_BACKEND_VULKAN;
+    fprintf(stderr, "FAIL: GPU_TEST_BACKEND must be default, d3d12, or vulkan\n");
+    exit(2);
+}
+
 static bool isSoftwareVulkanAdapter(GpuDevice device)
 {
     GpuCapabilities caps = {};
@@ -118,7 +128,10 @@ int main(void)
     printf("=== Phase C: Render Graph Test ===\n\n"); flush();
 
     GpuDevice device;
-    GpuDeviceDesc devDesc = { .appName = "phaseC_test", .enableDebugLayer = false };
+    const GpuBackend backend = testBackend();
+    GpuDeviceDesc devDesc = {
+        .appName = "phaseC_test", .enableDebugLayer = false, .preferredBackend = backend,
+    };
     CHECK(gpuCreateDevice(&devDesc, &device));
 
     GpuCommandQueue queue;
@@ -1026,7 +1039,7 @@ int main(void)
         GpuDeviceDesc deviceDesc = {
             .appName = "phaseC_surface_capture",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = backend,
         };
         CHECK(gpuCreateDevice(&deviceDesc, &captureDevice));
         GpuSurface surface;
@@ -1173,7 +1186,7 @@ int main(void)
         GpuDeviceDesc deviceDesc = {
             .appName = "phaseC_transient_typed_clear",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = backend,
         };
         CHECK(gpuCreateDevice(&deviceDesc, &clearDevice));
         GpuCommandQueue clearQueue;
@@ -1246,7 +1259,7 @@ int main(void)
         GpuDeviceDesc deviceDesc = {
             .appName = "phaseC_compute_texture_binding",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = backend,
         };
         CHECK(gpuCreateDevice(&deviceDesc, &textureDevice));
         GpuCommandQueue textureQueue;
@@ -1384,7 +1397,7 @@ int main(void)
         GpuDeviceDesc deviceDesc = {
             .appName = "phaseC_multi_queue_content",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = backend,
         };
         CHECK(gpuCreateDevice(&deviceDesc, &multiQueueDevice));
         GpuCommandQueue graphicsQueue;
@@ -1806,7 +1819,7 @@ phasec_finish_tests:
         GpuDeviceDesc deviceDesc = {
             .appName = "phaseC_graph_binding",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = backend,
         };
         CHECK(gpuCreateDevice(&deviceDesc, &bindingDevice));
         GpuCommandQueue bindingQueue;
@@ -1881,7 +1894,7 @@ phasec_finish_tests:
         GpuDeviceDesc deviceDesc = {
             .appName = "phaseC_graph_indirect",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = backend,
         };
         CHECK(gpuCreateDevice(&deviceDesc, &indirectDevice));
         GpuCommandQueue indirectQueue;
@@ -2006,7 +2019,7 @@ phasec_finish_tests:
         GpuDeviceDesc deviceDesc = {
             .appName = "phaseC_typed_clear",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = backend,
         };
         CHECK(gpuCreateDevice(&deviceDesc, &clearDevice));
         GpuCommandQueue clearQueue;
