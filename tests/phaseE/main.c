@@ -738,6 +738,79 @@ int main(void)
     }
     printf("  OK\n"); flush();
 
+    // =========================================================================
+    // [E.14] R11G11B10_FLOAT render target, sampled view, and readback
+    // =========================================================================
+    printf("[E.14] R11G11B10_FLOAT texture paths\n"); flush();
+    {
+        GpuDevice device;
+        GpuDeviceDesc devDesc = {
+            .appName = "phaseE_r11g11b10",
+            .enableDebugLayer = true,
+            .preferredBackend = GPU_BACKEND_DEFAULT,
+        };
+        CHECK(gpuCreateDevice(&devDesc, &device));
+
+        GpuCommandQueue queue;
+        CHECK(gpuGetQueue(device, GPU_QUEUE_TYPE_GRAPHICS, &queue));
+
+        GpuTextureDesc desc = {
+            .type = GPU_TEXTURE_TYPE_2D,
+            .width = 4, .height = 4, .depth = 1,
+            .arrayLength = 1, .mipCount = 1,
+            .format = GPU_FORMAT_R11G11B10_FLOAT,
+            .sampleCount = 1,
+            .usage = GPU_TEXTURE_USAGE_SHADER_RESOURCE |
+                     GPU_TEXTURE_USAGE_RENDER_TARGET |
+                     GPU_TEXTURE_USAGE_COPY_SOURCE |
+                     GPU_TEXTURE_USAGE_COPY_DEST,
+            .label = "phaseE_r11g11b10",
+        };
+        GpuTextureHandle texture;
+        GpuTextureHandle renderTargetView;
+        GpuTextureHandle sampledView;
+        CHECK(gpuCreateTexture(device, &desc, &texture));
+        CHECK(gpuCreateTextureView(device, texture, GPU_TEXTURE_VIEW_TYPE_RENDER_TARGET, &renderTargetView));
+        CHECK(gpuCreateTextureView(device, texture, GPU_TEXTURE_VIEW_TYPE_SHADER_RESOURCE, &sampledView));
+
+        GpuBufferHandle readback;
+        CHECK(gpuCreateReadbackBuffer(device, 256 * desc.height, &readback));
+        GpuCommandEncoder encoder = gpuBeginCommandEncoder(device, queue);
+        CHECK_TRUE(encoder != NULL);
+        GpuRenderPassColorAttachment color = {
+            .textureHandle = renderTargetView,
+            .loadOp = GPU_LOAD_OP_CLEAR,
+            .storeOp = GPU_STORE_OP_STORE,
+            .clearValue = { 1.0f, 0.5f, 0.25f, 1.0f },
+        };
+        GpuRenderPassDesc passDesc = { .colorAttachmentCount = 1, .colorAttachments = &color };
+        GpuRenderPassEncoder pass = gpuCmdBeginRenderPass(encoder, &passDesc);
+        CHECK_TRUE(pass != NULL);
+        gpuCmdEndRenderPass(pass);
+        CHECK(gpuCmdCopyTextureToBuffer(encoder, texture, 0, 0, readback, 0));
+        GpuCommandBuffer commands = gpuFinishCommandEncoder(encoder);
+        CHECK_TRUE(commands != NULL);
+        CHECK(gpuQueueSubmit(queue, 1, &commands));
+        CHECK(gpuQueueWaitOnHost(queue));
+
+        void* mapped = NULL;
+        CHECK(gpuMapReadbackBuffer(device, readback, &mapped));
+        CHECK_TRUE(mapped != NULL);
+        const uint32_t packed = *(const uint32_t*)mapped;
+        const uint32_t rowPitch = gpuGetReadbackRowPitch(texture, device);
+        printf("  packed texel: 0x%08x, row pitch: %u\n", packed, rowPitch);
+        CHECK_TRUE(packed == 0x681c03c0u);
+        CHECK_TRUE(rowPitch == 256);
+        gpuUnmapReadbackBuffer(device, readback);
+
+        gpuDestroyBuffer(device, readback);
+        gpuDestroyTextureView(device, sampledView);
+        gpuDestroyTextureView(device, renderTargetView);
+        gpuDestroyTexture(device, texture);
+        gpuDestroyDevice(device);
+    }
+    printf("  OK\n"); flush();
+
     printf("\nALL PASSED\n"); flush();
     return 0;
 }

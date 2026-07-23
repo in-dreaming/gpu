@@ -37,6 +37,7 @@ static uint32_t getFormatBytesPerPixel(rhi::Format format)
     case rhi::Format::R32Uint:
     case rhi::Format::R32Sint:
     case rhi::Format::R32Float:
+    case rhi::Format::R11G11B10Float:
     case rhi::Format::D16Unorm:
     case rhi::Format::D32Float:
         return 4;

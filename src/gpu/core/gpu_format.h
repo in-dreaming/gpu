@@ -53,6 +53,7 @@ typedef enum {
     GPU_FORMAT_D32_FLOAT,
     GPU_FORMAT_D16_UNORM,
     GPU_FORMAT_D32_FLOAT_S8_UINT,
+    GPU_FORMAT_R11G11B10_FLOAT,
 } GpuFormat;
 
 #ifdef __cplusplus

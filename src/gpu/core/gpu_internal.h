@@ -247,6 +247,7 @@ static inline rhi::Format gpuFormatToRhi(GpuFormat fmt)
     case GPU_FORMAT_D16_UNORM:        return rhi::Format::D16Unorm;
     case GPU_FORMAT_D32_FLOAT:        return rhi::Format::D32Float;
     case GPU_FORMAT_D32_FLOAT_S8_UINT: return rhi::Format::D32FloatS8Uint;
+    case GPU_FORMAT_R11G11B10_FLOAT:  return rhi::Format::R11G11B10Float;
     default:                          return rhi::Format::Undefined;
     }
 }
