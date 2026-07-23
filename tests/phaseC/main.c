@@ -52,7 +52,15 @@ typedef struct {
     GpuGraphResource arguments;
     GpuPipelineHandle pipeline;
     GpuResult result;
+    GpuResult dataResult;
 } GraphBindingTestData;
+
+typedef struct {
+    GpuGraphResource source;
+    GpuGraphResource target;
+    GpuPipelineHandle pipeline;
+    GpuResult result;
+} TextureBindingTestData;
 
 static void graph_binding_callback(GpuGraphPassContext* ctx, void* userData)
 {
@@ -66,6 +74,13 @@ static void graph_binding_callback(GpuGraphPassContext* ctx, void* userData)
         ctx->computePass, 0, 0, output, 0, 4 * sizeof(uint32_t),
         GPU_BUFFER_BINDING_READ_WRITE);
     if (data->result != GPU_SUCCESS) return;
+    const uint32_t baseValue = 41;
+    data->dataResult = gpuCmdSetComputeBindingData(
+        ctx->computePass, 0, 1, &baseValue, sizeof(baseValue));
+    if (data->dataResult != GPU_SUCCESS) {
+        data->result = data->dataResult;
+        return;
+    }
     if (data->arguments != GPU_GRAPH_NULL_RESOURCE) {
         GpuBufferHandle arguments = GPU_NULL_HANDLE;
         data->result = gpuGraphPassGetBuffer(ctx, data->arguments, &arguments);
@@ -74,6 +89,28 @@ static void graph_binding_callback(GpuGraphPassContext* ctx, void* userData)
     } else {
         gpuCmdDispatchCompute(ctx->computePass, 4, 1, 1);
     }
+}
+
+static void texture_binding_callback(GpuGraphPassContext* ctx, void* userData)
+{
+    TextureBindingTestData* data = (TextureBindingTestData*)userData;
+    GpuTextureHandle source = GPU_NULL_HANDLE;
+    GpuTextureHandle target = GPU_NULL_HANDLE;
+    data->result = gpuGraphPassGetTexture(ctx, data->source, &source);
+    if (data->result != GPU_SUCCESS) return;
+    data->result = gpuGraphPassGetTexture(ctx, data->target, &target);
+    if (data->result != GPU_SUCCESS) return;
+    data->result = gpuCmdBindComputePipelineHandle(ctx->computePass, data->pipeline);
+    if (data->result != GPU_SUCCESS) return;
+    data->result = gpuCmdSetComputeBindingTexture(ctx->computePass, 0, 0, source);
+    if (data->result != GPU_SUCCESS) return;
+    data->result = gpuCmdSetComputeBindingTexture(ctx->computePass, 0, 1, target);
+    if (data->result != GPU_SUCCESS) return;
+    const uint32_t parameters[4] = {4, 4, 2, 2};
+    data->result = gpuCmdSetComputeBindingData(
+        ctx->computePass, 0, 2, parameters, sizeof(parameters));
+    if (data->result != GPU_SUCCESS) return;
+    gpuCmdDispatchCompute(ctx->computePass, 1, 1, 1);
 }
 
 int main(void)
@@ -1202,6 +1239,109 @@ int main(void)
     }
     printf("  OK\n"); flush();
 
+    /* C.51 Graph callback compute texture and constant-data binding */
+    printf("[C.51] Graph callback compute texture binding\n"); flush();
+    {
+        GpuDevice textureDevice;
+        GpuDeviceDesc deviceDesc = {
+            .appName = "phaseC_compute_texture_binding",
+            .enableDebugLayer = true,
+            .preferredBackend = GPU_BACKEND_DEFAULT,
+        };
+        CHECK(gpuCreateDevice(&deviceDesc, &textureDevice));
+        GpuCommandQueue textureQueue;
+        CHECK(gpuGetQueue(textureDevice, GPU_QUEUE_TYPE_GRAPHICS, &textureQueue));
+        GpuShaderCompiler compiler;
+        CHECK(gpuCreateShaderCompiler(textureDevice, &compiler));
+        GpuShaderCompileDesc shaderDesc = {
+            .sourcePath = "compute_texture_binding_test.slang",
+            .entryPoint = "computeMain",
+            .target = GPU_SHADER_TARGET_DXIL,
+        };
+        GpuShaderProgram program = NULL;
+        CHECK(gpuCompileShader(compiler, &shaderDesc, &program));
+        GpuPipelineHandle pipeline = GPU_NULL_HANDLE;
+        CHECK(gpuCreateComputePipelineFromProgram(
+            textureDevice, program, "compute_texture_binding", &pipeline));
+        const float sourceValues[16] = {
+            1, 2, 3, 4, 5, 6, 7, 8,
+            9, 10, 11, 12, 13, 14, 15, 16,
+        };
+        GpuTextureDesc sourceDesc = {
+            .type = GPU_TEXTURE_TYPE_2D, .width = 4, .height = 4, .depth = 1,
+            .arrayLength = 1, .mipCount = 1, .format = GPU_FORMAT_R32_FLOAT,
+            .sampleCount = 1,
+            .usage = GPU_TEXTURE_USAGE_SHADER_RESOURCE | GPU_TEXTURE_USAGE_COPY_DEST,
+            .label = "compute_texture_source",
+        };
+        GpuTextureDesc targetDesc = sourceDesc;
+        targetDesc.width = 2;
+        targetDesc.height = 2;
+        targetDesc.usage = GPU_TEXTURE_USAGE_UNORDERED_ACCESS |
+                           GPU_TEXTURE_USAGE_COPY_SOURCE;
+        targetDesc.label = "compute_texture_target";
+        GpuTextureHandle source;
+        GpuTextureHandle target;
+        CHECK(gpuCreateTexture(textureDevice, &sourceDesc, &source));
+        CHECK(gpuCreateTexture(textureDevice, &targetDesc, &target));
+        GpuTextureUploadDesc upload = {
+            .data = sourceValues, .dataSize = sizeof(sourceValues),
+            .rowPitch = 4 * sizeof(float), .slicePitch = sizeof(sourceValues),
+            .mipLevel = 0, .arrayLayer = 0,
+        };
+        CHECK(gpuUploadTextureData(textureDevice, source, &upload));
+        GpuGraph graph;
+        CHECK(gpuGraphCreate(textureDevice, &graph));
+        GpuGraphResource sourceResource = gpuGraphImportTextureEx(
+            graph, source, GPU_RESOURCE_STATE_SHADER_RESOURCE,
+            GPU_RESOURCE_STATE_SHADER_RESOURCE, "compute_texture_source");
+        GpuGraphResource targetResource = gpuGraphImportTextureEx(
+            graph, target, GPU_RESOURCE_STATE_UNORDERED_ACCESS,
+            GPU_RESOURCE_STATE_COPY_SOURCE, "compute_texture_target");
+        GpuGraphPass pass = gpuGraphAddComputePass(graph, "compute_texture_binding");
+        gpuGraphPassRead(pass, sourceResource);
+        gpuGraphPassWrite(pass, targetResource);
+        TextureBindingTestData callbackData = {
+            .source = sourceResource, .target = targetResource,
+            .pipeline = pipeline, .result = GPU_ERROR_UNKNOWN,
+        };
+        gpuGraphPassSetCallback(pass, texture_binding_callback, &callbackData);
+        CHECK(gpuGraphCompile(graph));
+        CHECK(gpuGraphExecute(graph, textureQueue));
+        CHECK(gpuQueueWaitOnHost(textureQueue));
+        CHECK(callbackData.result);
+        GpuTextureFootprint footprint = {0};
+        CHECK(gpuGetTextureReadbackFootprint(textureDevice, target, 0, &footprint));
+        GpuBufferHandle readback;
+        CHECK(gpuCreateReadbackBuffer(textureDevice, footprint.totalSize, &readback));
+        GpuCommandEncoder encoder = gpuBeginCommandEncoder(textureDevice, textureQueue);
+        CHECK_TRUE(encoder != NULL);
+        CHECK(gpuCmdCopyTextureToBuffer(encoder, target, 0, 0, readback, 0));
+        GpuCommandBuffer commands = gpuFinishCommandEncoder(encoder);
+        CHECK_TRUE(commands != NULL);
+        CHECK(gpuQueueSubmit(textureQueue, 1, &commands));
+        CHECK(gpuQueueWaitOnHost(textureQueue));
+        void* mapped = NULL;
+        CHECK(gpuMapReadbackBuffer(textureDevice, readback, &mapped));
+        const float expected[4] = {6, 8, 14, 16};
+        for (uint32_t y = 0; y < 2; ++y) {
+            const float* row =
+                (const float*)((const uint8_t*)mapped + y * footprint.rowPitch);
+            for (uint32_t x = 0; x < 2; ++x)
+                CHECK_TRUE(row[x] == expected[y * 2 + x]);
+        }
+        gpuUnmapReadbackBuffer(textureDevice, readback);
+        gpuDestroyBuffer(textureDevice, readback);
+        gpuGraphDestroy(graph);
+        gpuDestroyTexture(textureDevice, target);
+        gpuDestroyTexture(textureDevice, source);
+        CHECK(gpuDestroyPipeline(textureDevice, pipeline));
+        gpuDestroyShaderProgram(program);
+        gpuDestroyShaderCompiler(compiler);
+        gpuDestroyDevice(textureDevice);
+    }
+    printf("  OK\n"); flush();
+
     if (isSoftwareVulkanAdapter(device)) {
         printf("[C.30-C.38] Skipped on software Vulkan\n"); flush();
         goto phasec_finish_tests;
@@ -1316,6 +1456,7 @@ int main(void)
             .arguments = GPU_GRAPH_NULL_RESOURCE,
             .pipeline = pipeline,
             .result = GPU_ERROR_UNKNOWN,
+            .dataResult = GPU_ERROR_UNKNOWN,
         };
         gpuGraphPassSetCallback(compute, graph_binding_callback, &callbackData);
         GpuGraphPass download = gpuGraphAddCopyPass(
@@ -1708,6 +1849,7 @@ phasec_finish_tests:
             .arguments = GPU_GRAPH_NULL_RESOURCE,
             .pipeline = pipeline,
             .result = GPU_ERROR_UNKNOWN,
+            .dataResult = GPU_ERROR_UNKNOWN,
         };
         gpuGraphPassSetCallback(pass, graph_binding_callback, &callbackData);
         CHECK(gpuGraphCompile(graph));
@@ -1801,6 +1943,7 @@ phasec_finish_tests:
             .arguments = argumentResource,
             .pipeline = pipeline,
             .result = GPU_ERROR_UNKNOWN,
+            .dataResult = GPU_ERROR_UNKNOWN,
         };
         gpuGraphPassSetCallback(pass, graph_binding_callback, &callbackData);
         CHECK(gpuGraphCompile(graph));
