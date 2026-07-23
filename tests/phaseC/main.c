@@ -1091,10 +1091,122 @@ int main(void)
         GpuCommandBuffer gfxCmd = gpuFinishCommandEncoder(gfxEnc);
         CHECK_TRUE(gfxCmd != NULL);
 
-        CHECK(gpuSetupComputeToGraphicsSync(cmpQueue, cmpCmd, gfxQueue, gfxCmd, fence, 1));
-        gpuQueueWaitOnHost(gfxQueue);
+        CHECK(gpuSetupComputeToGraphicsSync(
+            cmpQueue, cmpCmd, gfxQueue, gfxCmd, fence, 1));
+        CHECK(gpuQueueWaitOnHost(gfxQueue));
         CHECK_TRUE(gpuFenceIsCompleted(fence, 1));
         gpuDestroyFence(device, fence);
+    }
+    printf("  OK\n"); flush();
+
+    /* C.47 Exact graphics-compute-graphics multi-queue content */
+    printf("[C.47] Multi-queue content correctness\n"); flush();
+    {
+        GpuDevice multiQueueDevice;
+        GpuDeviceDesc deviceDesc = {
+            .appName = "phaseC_multi_queue_content",
+            .enableDebugLayer = true,
+            .preferredBackend = GPU_BACKEND_DEFAULT,
+        };
+        CHECK(gpuCreateDevice(&deviceDesc, &multiQueueDevice));
+        GpuCommandQueue graphicsQueue;
+        CHECK(gpuGetQueue(
+            multiQueueDevice, GPU_QUEUE_TYPE_GRAPHICS, &graphicsQueue));
+        GpuShaderCompiler compiler;
+        CHECK(gpuCreateShaderCompiler(multiQueueDevice, &compiler));
+        GpuShaderCompileDesc shaderDesc = {
+            .sourcePath = "graph_binding_test.slang",
+            .entryPoint = "computeMain",
+            .fragmentEntryPoint = NULL,
+            .target = GPU_SHADER_TARGET_DXIL,
+        };
+        GpuShaderProgram program = NULL;
+        CHECK(gpuCompileShader(compiler, &shaderDesc, &program));
+        GpuPipelineHandle pipeline = GPU_NULL_HANDLE;
+        CHECK(gpuCreateComputePipelineFromProgram(
+            multiQueueDevice, program, "multi_queue_compute", &pipeline));
+
+        const uint32_t inputData[4] = {3u, 5u, 8u, 13u};
+        GpuBufferDesc sourceDesc = {
+            .size = sizeof(inputData),
+            .elementSize = sizeof(uint32_t),
+            .usage = GPU_BUFFER_USAGE_COPY_SOURCE,
+            .label = "multi_queue_source",
+        };
+        GpuBufferDesc outputDesc = {
+            .size = sizeof(inputData),
+            .elementSize = sizeof(uint32_t),
+            .usage = GPU_BUFFER_USAGE_COPY_DEST |
+                     GPU_BUFFER_USAGE_UNORDERED_ACCESS |
+                     GPU_BUFFER_USAGE_COPY_SOURCE,
+            .label = "multi_queue_output",
+        };
+        GpuBufferHandle source, output, readback;
+        CHECK(gpuCreateBufferInit(
+            multiQueueDevice, &sourceDesc, inputData, &source));
+        CHECK(gpuCreateBuffer(multiQueueDevice, &outputDesc, &output));
+        CHECK(gpuCreateReadbackBuffer(
+            multiQueueDevice, 256, &readback));
+
+        GpuGraph graph;
+        CHECK(gpuGraphCreate(multiQueueDevice, &graph));
+        gpuGraphSetExecuteMode(graph, GPU_GRAPH_EXECUTE_MULTI_QUEUE);
+        GpuGraphResource sourceResource = gpuGraphImportBufferEx(
+            graph, source,
+            GPU_RESOURCE_STATE_COPY_SOURCE,
+            GPU_RESOURCE_STATE_COPY_SOURCE,
+            "multi_queue_source");
+        GpuGraphResource outputResource = gpuGraphImportBufferEx(
+            graph, output,
+            GPU_RESOURCE_STATE_COPY_DEST,
+            GPU_RESOURCE_STATE_COPY_SOURCE,
+            "multi_queue_output");
+        GpuGraphResource readbackResource = gpuGraphImportBufferEx(
+            graph, readback,
+            GPU_RESOURCE_STATE_COPY_DEST,
+            GPU_RESOURCE_STATE_COPY_DEST,
+            "multi_queue_readback");
+
+        GpuGraphPass upload = gpuGraphAddCopyPass(graph, "multi_queue_upload");
+        gpuGraphPassRead(upload, sourceResource);
+        gpuGraphPassWrite(upload, outputResource);
+        GpuGraphPass compute = gpuGraphAddComputePass(
+            graph, "multi_queue_compute");
+        gpuGraphPassReadWrite(compute, outputResource);
+        GraphBindingTestData callbackData = {
+            .output = outputResource,
+            .arguments = GPU_GRAPH_NULL_RESOURCE,
+            .pipeline = pipeline,
+            .result = GPU_ERROR_UNKNOWN,
+        };
+        gpuGraphPassSetCallback(compute, graph_binding_callback, &callbackData);
+        GpuGraphPass download = gpuGraphAddCopyPass(
+            graph, "multi_queue_download");
+        gpuGraphPassRead(download, outputResource);
+        gpuGraphPassWrite(download, readbackResource);
+
+        CHECK(gpuGraphCompile(graph));
+        CHECK(gpuGraphExecute(graph, graphicsQueue));
+        CHECK(gpuQueueWaitOnHost(graphicsQueue));
+        CHECK(callbackData.result);
+        void* mapped = NULL;
+        CHECK(gpuMapReadbackBuffer(multiQueueDevice, readback, &mapped));
+        const uint32_t* actual = (const uint32_t*)mapped;
+        printf("  C.47 output: %u %u %u %u\n",
+               actual[0], actual[1], actual[2], actual[3]); flush();
+        for (uint32_t i = 0; i < 4; ++i) {
+            CHECK_TRUE(actual[i] == i + 41u);
+        }
+        gpuUnmapReadbackBuffer(multiQueueDevice, readback);
+
+        gpuGraphDestroy(graph);
+        gpuDestroyBuffer(multiQueueDevice, readback);
+        gpuDestroyBuffer(multiQueueDevice, output);
+        gpuDestroyBuffer(multiQueueDevice, source);
+        CHECK(gpuDestroyPipeline(multiQueueDevice, pipeline));
+        gpuDestroyShaderProgram(program);
+        gpuDestroyShaderCompiler(compiler);
+        gpuDestroyDevice(multiQueueDevice);
     }
     printf("  OK\n"); flush();
 

@@ -194,6 +194,28 @@ static GpuQueueType queueTypeForPassKind(GpuGraphPassKind kind)
     }
 }
 
+static GpuQueueType graphQueueTypeForPass(GpuGraph graph, uint32_t passIndex)
+{
+    auto& pass = *graph->passes[passIndex];
+    if (pass.kind == GPU_GRAPH_PASS_COMPUTE) {
+        for (const auto& access : pass.accesses) {
+            if (access.resource > 0 &&
+                access.resource <= graph->resources.size() &&
+                graph->resources[access.resource - 1].kind ==
+                    GPU_GRAPH_RESOURCE_TEXTURE) {
+                return GPU_QUEUE_TYPE_GRAPHICS;
+            }
+        }
+    }
+    if (pass.kind == GPU_GRAPH_PASS_COPY) {
+        // The public copy command set and surface copies require graphics-capable
+        // transitions. Multi-queue mode still schedules buffer-only compute on
+        // the independent compute queue.
+        return GPU_QUEUE_TYPE_GRAPHICS;
+    }
+    return queueTypeForPassKind(pass.kind);
+}
+
 static void assignLifetimeAliasing(GpuGraph graph)
 {
     auto assignForKind = [&](GpuGraphResourceKind kind, bool isTexture) {
@@ -1024,10 +1046,10 @@ GpuResult gpuGraphCompile(GpuGraph graph)
         b.arrayLayer = arrayLayer;
         b.arrayCount = (mipLevel == 0 && arrayLayer == 0) ? 0 : 1;
         b.hazardKind = hazard;
-        b.destQueue = queueTypeForPassKind(graph->passes[pi]->kind);
+        b.destQueue = graphQueueTypeForPass(graph, pi);
         b.srcQueue = GPU_QUEUE_TYPE_GRAPHICS;
         if (res.lastWriterPass != UINT32_MAX && res.lastWriterPass < graph->passes.size())
-            b.srcQueue = queueTypeForPassKind(graph->passes[res.lastWriterPass]->kind);
+            b.srcQueue = graphQueueTypeForPass(graph, res.lastWriterPass);
         b.queueOwnershipTransfer = res.hadWriter && res.lastWriterPass != UINT32_MAX && b.srcQueue != b.destQueue;
         barriers.push_back(b);
         res.currentState = targetState;
@@ -1291,25 +1313,10 @@ GpuResult gpuGraphCompile(GpuGraph graph)
 static void emitBarriers(GpuGraph graph, GpuCommandEncoder encoder, GpuQueueType queueType,
                          const std::vector<GpuCompiledBarrier>& barriers)
 {
-    const bool onTransferQueue = queueType == GPU_QUEUE_TYPE_TRANSFER;
-    const bool onComputeQueue = queueType == GPU_QUEUE_TYPE_COMPUTE;
+    (void)queueType;
     for (auto& b : barriers) {
-        auto updateTrackedState = [&]() {
-            if (b.isTexture && b.tex.index != 0) {
-                graph->device->textureStates[b.tex.index] = b.after;
-            } else if (!b.isTexture && b.buf.index != 0) {
-                graph->device->bufferStates[b.buf.index] = b.after;
-            }
-        };
-
         if (b.isGlobalBarrier) {
-            if (!onTransferQueue) gpuCmdGlobalBarrier(encoder);
-            continue;
-        }
-
-        if (onTransferQueue || onComputeQueue) {
-            if (!onTransferQueue) gpuCmdGlobalBarrier(encoder);
-            updateTrackedState();
+            gpuCmdGlobalBarrier(encoder);
             continue;
         }
 
@@ -1458,7 +1465,12 @@ static void executeGraphPass(GpuGraph graph, GpuCommandEncoder encoder, GpuQueue
             for (const auto& copyOp : graph->passCopyOps[pi]) {
                 if (copyOp.kind == GpuCompiledCopyOp::BufferToBuffer) {
                     gpuCmdCopyBuffer(
-                        encoder, copyOp.dstBuffer, 0, copyOp.srcBuffer, 0, copyOp.size);
+                        encoder,
+                        copyOp.dstBuffer,
+                        0,
+                        copyOp.srcBuffer,
+                        0,
+                        copyOp.size);
                     continue;
                 }
                 rhi::IBuffer* destination = graph->device->bufferPool.resolve(
@@ -1537,9 +1549,9 @@ static GpuResult executePassSubmit(GpuGraph graph, GpuCommandQueue queue)
     return GPU_SUCCESS;
 }
 
-static GpuQueueType executionQueueForPassKind(GpuGraphPassKind kind)
+static GpuQueueType executionQueueForPass(GpuGraph graph, uint32_t passIndex)
 {
-    return queueTypeForPassKind(kind);
+    return graphQueueTypeForPass(graph, passIndex);
 }
 
 static GpuResult executeMultiQueue(GpuGraph graph)
@@ -1554,7 +1566,7 @@ static GpuResult executeMultiQueue(GpuGraph graph)
         uint32_t pi = graph->executionOrder[si];
         auto& pass = *graph->passes[pi];
         if (pass.culled) continue;
-        GpuQueueType qt = executionQueueForPassKind(pass.kind);
+        GpuQueueType qt = executionQueueForPass(graph, pi);
         if (!segments.empty() && segments.back().type == qt) {
             segments.back().passIndices.push_back(pi);
         } else {
@@ -1563,15 +1575,41 @@ static GpuResult executeMultiQueue(GpuGraph graph)
     }
 
     if (segments.empty()) return GPU_SUCCESS;
+    auto emitOwnershipReleases = [&](
+        GpuCommandEncoder encoder,
+        GpuQueueType sourceQueue,
+        const Segment& nextSegment) {
+        std::unordered_set<uint32_t> releasedResources;
+        for (uint32_t nextPassIndex : nextSegment.passIndices) {
+            for (const auto& barrier : graph->passBarriers[nextPassIndex]) {
+                if (barrier.isGlobalBarrier || !barrier.queueOwnershipTransfer ||
+                    barrier.srcQueue != sourceQueue ||
+                    !releasedResources.insert(barrier.resourceIndex).second) {
+                    continue;
+                }
+                if (barrier.isTexture && barrier.tex.index != 0) {
+                    gpuCmdSetTextureState(
+                        graph->device, encoder, barrier.tex, GPU_RESOURCE_STATE_COMMON);
+                } else if (!barrier.isTexture && barrier.buf.index != 0) {
+                    gpuCmdSetBufferState(
+                        graph->device, encoder, barrier.buf, GPU_RESOURCE_STATE_COMMON);
+                }
+            }
+        }
+    };
 
     uint32_t profileQueryIndex = 0;
     for (size_t si = 0; si < segments.size(); si++) {
         auto& seg = segments[si];
         GpuCommandQueue queue = nullptr;
-        if (gpuGetQueue(graph->device, seg.type, &queue) != GPU_SUCCESS) return GPU_ERROR_INTERNAL;
+        if (gpuGetQueue(graph->device, seg.type, &queue) != GPU_SUCCESS) {
+            return GPU_ERROR_INTERNAL;
+        }
 
         GpuCommandEncoder encoder = gpuBeginCommandEncoder(graph->device, queue);
-        if (!encoder) return GPU_ERROR_INTERNAL;
+        if (!encoder) {
+            return GPU_ERROR_INTERNAL;
+        }
 
         for (uint32_t pi : seg.passIndices) {
             emitBarriers(graph, encoder, seg.type, graph->passBarriers[pi]);
@@ -1580,16 +1618,21 @@ static GpuResult executeMultiQueue(GpuGraph graph)
         }
 
         if (si + 1 < segments.size() && segments[si + 1].type != seg.type) {
+            emitOwnershipReleases(encoder, seg.type, segments[si + 1]);
             gpuCmdGlobalBarrier(encoder);
         }
 
         GpuCommandBuffer cmd = gpuFinishCommandEncoder(encoder);
-        if (!cmd) return GPU_ERROR_INTERNAL;
+        if (!cmd) {
+            return GPU_ERROR_INTERNAL;
+        }
 
-        // Keep segment ordering and graph-owned resources valid until GPU-side
-        // cross-queue dependencies replace this host-synchronized path.
-        if (gpuQueueSubmit(queue, 1, &cmd) != GPU_SUCCESS) return GPU_ERROR_INTERNAL;
-        if (gpuQueueWaitOnHost(queue) != GPU_SUCCESS) return GPU_ERROR_INTERNAL;
+        if (gpuQueueSubmit(queue, 1, &cmd) != GPU_SUCCESS) {
+            return GPU_ERROR_INTERNAL;
+        }
+        if (gpuQueueWaitOnHost(queue) != GPU_SUCCESS) {
+            return GPU_ERROR_INTERNAL;
+        }
     }
 
     return GPU_SUCCESS;
