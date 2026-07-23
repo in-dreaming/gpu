@@ -8,6 +8,16 @@
 
 static void flush(void) { fflush(stdout); fflush(stderr); }
 
+static GpuBackend formatTestBackend(void)
+{
+    const char* value = getenv("GPU_TEST_BACKEND");
+    if (!value || !value[0] || strcmp(value, "default") == 0) return GPU_BACKEND_DEFAULT;
+    if (strcmp(value, "d3d12") == 0) return GPU_BACKEND_D3D12;
+    if (strcmp(value, "vulkan") == 0) return GPU_BACKEND_VULKAN;
+    fprintf(stderr, "FAIL: GPU_TEST_BACKEND must be default, d3d12, or vulkan\n");
+    exit(2);
+}
+
 #define RT_SIZE 64
 
 // =========================================================================
@@ -747,7 +757,7 @@ int main(void)
         GpuDeviceDesc devDesc = {
             .appName = "phaseE_r11g11b10",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = formatTestBackend(),
         };
         CHECK(gpuCreateDevice(&devDesc, &device));
 
@@ -820,7 +830,7 @@ int main(void)
         GpuDeviceDesc devDesc = {
             .appName = "phaseE_typed_texture_io",
             .enableDebugLayer = true,
-            .preferredBackend = GPU_BACKEND_DEFAULT,
+            .preferredBackend = formatTestBackend(),
         };
         CHECK(gpuCreateDevice(&devDesc, &device));
         GpuCommandQueue queue;
