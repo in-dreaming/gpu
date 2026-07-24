@@ -1015,6 +1015,7 @@ int main(void)
         if (!isSoftwareVulkanAdapter(device)) {
             CHECK(gpuGraphExecute(graph, queue));
             gpuQueueWaitOnHost(queue);
+            CHECK_TRUE(gpuGetDeviceLastDiagnostic(device)[0] == '\0');
         } else {
             printf("  (skipped graph execute on software Vulkan)\n"); flush();
         }
@@ -1404,6 +1405,14 @@ int main(void)
         GpuCommandQueue graphicsQueue;
         CHECK(gpuGetQueue(
             multiQueueDevice, GPU_QUEUE_TYPE_GRAPHICS, &graphicsQueue));
+        GpuCommandQueue computeQueue, transferQueue;
+        CHECK(gpuGetQueue(
+            multiQueueDevice, GPU_QUEUE_TYPE_COMPUTE, &computeQueue));
+        CHECK(gpuGetQueue(
+            multiQueueDevice, GPU_QUEUE_TYPE_TRANSFER, &transferQueue));
+        CHECK_TRUE(graphicsQueue != computeQueue);
+        CHECK_TRUE(graphicsQueue != transferQueue);
+        CHECK_TRUE(computeQueue != transferQueue);
         GpuShaderCompiler compiler;
         CHECK(gpuCreateShaderCompiler(multiQueueDevice, &compiler));
         GpuShaderCompileDesc shaderDesc = {
@@ -1490,6 +1499,7 @@ int main(void)
         for (uint32_t i = 0; i < 4; ++i) {
             CHECK_TRUE(actual[i] == i + 41u);
         }
+        CHECK_TRUE(gpuGetDeviceLastDiagnostic(multiQueueDevice)[0] == '\0');
         gpuUnmapReadbackBuffer(multiQueueDevice, readback);
 
         gpuGraphDestroy(graph);
@@ -1509,7 +1519,8 @@ int main(void)
         gpuSetDebugLevel(device, GPU_DEBUG_LEVEL_ERROR);
         GpuBufferDesc bdesc = {
             .size = 256, .elementSize = 4,
-            .usage = GPU_BUFFER_USAGE_COPY_DEST,
+            .usage = GPU_BUFFER_USAGE_COPY_DEST |
+                     GPU_BUFFER_USAGE_UNORDERED_ACCESS,
             .label = "hazard_buf"
         };
         GpuBufferHandle buf;

@@ -197,22 +197,6 @@ static GpuQueueType queueTypeForPassKind(GpuGraphPassKind kind)
 static GpuQueueType graphQueueTypeForPass(GpuGraph graph, uint32_t passIndex)
 {
     auto& pass = *graph->passes[passIndex];
-    if (pass.kind == GPU_GRAPH_PASS_COMPUTE) {
-        for (const auto& access : pass.accesses) {
-            if (access.resource > 0 &&
-                access.resource <= graph->resources.size() &&
-                graph->resources[access.resource - 1].kind ==
-                    GPU_GRAPH_RESOURCE_TEXTURE) {
-                return GPU_QUEUE_TYPE_GRAPHICS;
-            }
-        }
-    }
-    if (pass.kind == GPU_GRAPH_PASS_COPY) {
-        // The public copy command set and surface copies require graphics-capable
-        // transitions. Multi-queue mode still schedules buffer-only compute on
-        // the independent compute queue.
-        return GPU_QUEUE_TYPE_GRAPHICS;
-    }
     return queueTypeForPassKind(pass.kind);
 }
 
@@ -1149,11 +1133,8 @@ GpuResult gpuGraphCompile(GpuGraph graph)
 
             GpuAccessFlags access = graphAccessToFlags(acc.access, pass.kind);
             GpuResourceState targetState = accessToState(acc.access, res.kind, pass.kind, false, false);
-            // Handle-backed copy helpers perform their own transition, but a
-            // surface has no public texture handle. Keep its graph-owned
-            // CopySource transition instead of replacing it with SRV state.
             if (acc.access == GPU_GRAPH_ACCESS_READ &&
-                (pass.kind != GPU_GRAPH_PASS_COPY || !res.isSurfaceTexture))
+                pass.kind != GPU_GRAPH_PASS_COPY)
                 targetState = graphReadStateForResource(graph->device, res);
             if (acc.access == GPU_GRAPH_ACCESS_PRESENT)
                 targetState = GPU_RESOURCE_STATE_PRESENT;
@@ -1606,6 +1587,10 @@ static GpuResult executeMultiQueue(GpuGraph graph)
     }
 
     if (segments.empty()) return GPU_SUCCESS;
+    GpuFence queueFence = nullptr;
+    if (gpuCreateFence(graph->device, 0, &queueFence) != GPU_SUCCESS)
+        return GPU_ERROR_INTERNAL;
+
     auto emitOwnershipReleases = [&](
         GpuCommandEncoder encoder,
         GpuQueueType sourceQueue,
@@ -1621,6 +1606,15 @@ static GpuResult executeMultiQueue(GpuGraph graph)
                 if (barrier.isTexture && barrier.tex.index != 0) {
                     gpuCmdSetTextureState(
                         graph->device, encoder, barrier.tex, GPU_RESOURCE_STATE_COMMON);
+                } else if (barrier.isTexture &&
+                           barrier.resourceIndex < graph->resources.size()) {
+                    auto& resource = graph->resources[barrier.resourceIndex];
+                    if (resource.isSurfaceTexture &&
+                        resource.importedSurfaceTexture) {
+                        encoder->rhiEncoder->setTextureState(
+                            resource.importedSurfaceTexture->rhiTexture,
+                            rhi::ResourceState::General);
+                    }
                 } else if (!barrier.isTexture && barrier.buf.index != 0) {
                     gpuCmdSetBufferState(
                         graph->device, encoder, barrier.buf, GPU_RESOURCE_STATE_COMMON);
@@ -1630,16 +1624,20 @@ static GpuResult executeMultiQueue(GpuGraph graph)
     };
 
     uint32_t profileQueryIndex = 0;
+    uint64_t submittedFenceValue = 0;
+    GpuResult executeResult = GPU_SUCCESS;
     for (size_t si = 0; si < segments.size(); si++) {
         auto& seg = segments[si];
         GpuCommandQueue queue = nullptr;
         if (gpuGetQueue(graph->device, seg.type, &queue) != GPU_SUCCESS) {
-            return GPU_ERROR_INTERNAL;
+            executeResult = GPU_ERROR_INTERNAL;
+            break;
         }
 
         GpuCommandEncoder encoder = gpuBeginCommandEncoder(graph->device, queue);
         if (!encoder) {
-            return GPU_ERROR_INTERNAL;
+            executeResult = GPU_ERROR_INTERNAL;
+            break;
         }
 
         for (uint32_t pi : seg.passIndices) {
@@ -1655,18 +1653,37 @@ static GpuResult executeMultiQueue(GpuGraph graph)
 
         GpuCommandBuffer cmd = gpuFinishCommandEncoder(encoder);
         if (!cmd) {
-            return GPU_ERROR_INTERNAL;
+            executeResult = GPU_ERROR_INTERNAL;
+            break;
         }
 
-        if (gpuQueueSubmit(queue, 1, &cmd) != GPU_SUCCESS) {
-            return GPU_ERROR_INTERNAL;
+        const GpuSemaphore wait = {queueFence, (uint64_t)si};
+        const GpuSemaphore signal = {queueFence, (uint64_t)si + 1};
+        if (gpuQueueSubmitWithSync(
+                queue,
+                si == 0 ? 0u : 1u,
+                si == 0 ? nullptr : &wait,
+                1,
+                &cmd,
+                &signal) != GPU_SUCCESS) {
+            executeResult = GPU_ERROR_INTERNAL;
+            break;
         }
-        if (gpuQueueWaitOnHost(queue) != GPU_SUCCESS) {
-            return GPU_ERROR_INTERNAL;
-        }
+        submittedFenceValue = (uint64_t)si + 1;
     }
 
-    return GPU_SUCCESS;
+    if (submittedFenceValue > 0 &&
+        gpuFenceWaitOnHost(
+            queueFence,
+            submittedFenceValue,
+            UINT32_MAX) != GPU_SUCCESS) {
+        executeResult = GPU_ERROR_INTERNAL;
+    }
+    if (executeResult == GPU_SUCCESS &&
+        submittedFenceValue != (uint64_t)segments.size())
+        executeResult = GPU_ERROR_INTERNAL;
+    gpuDestroyFence(graph->device, queueFence);
+    return executeResult;
 }
 
 GpuResult gpuGraphExecute(GpuGraph graph, GpuCommandQueue queue)

@@ -7,6 +7,17 @@
 
 static GpuResourceState gpuDefaultBufferState(GpuBufferUsage usage)
 {
+    const GpuBufferUsage statefulUsage = usage & (
+        GPU_BUFFER_USAGE_VERTEX_BUFFER |
+        GPU_BUFFER_USAGE_INDEX_BUFFER |
+        GPU_BUFFER_USAGE_CONSTANT_BUFFER |
+        GPU_BUFFER_USAGE_SHADER_RESOURCE |
+        GPU_BUFFER_USAGE_UNORDERED_ACCESS |
+        GPU_BUFFER_USAGE_INDIRECT_ARGUMENT |
+        GPU_BUFFER_USAGE_COPY_SOURCE |
+        GPU_BUFFER_USAGE_COPY_DEST);
+    if (statefulUsage && (statefulUsage & (statefulUsage - 1)) != 0)
+        return GPU_RESOURCE_STATE_COMMON;
     if (usage & GPU_BUFFER_USAGE_UNORDERED_ACCESS) return GPU_RESOURCE_STATE_UNORDERED_ACCESS;
     if (usage & GPU_BUFFER_USAGE_SHADER_RESOURCE) return GPU_RESOURCE_STATE_SHADER_RESOURCE;
     if (usage & GPU_BUFFER_USAGE_CONSTANT_BUFFER) return GPU_RESOURCE_STATE_CONSTANT_BUFFER;
@@ -16,6 +27,21 @@ static GpuResourceState gpuDefaultBufferState(GpuBufferUsage usage)
     if (usage & GPU_BUFFER_USAGE_COPY_DEST) return GPU_RESOURCE_STATE_COPY_DEST;
     if (usage & GPU_BUFFER_USAGE_COPY_SOURCE) return GPU_RESOURCE_STATE_COPY_SOURCE;
     return GPU_RESOURCE_STATE_COMMON;
+}
+
+static rhi::ResourceState gpuDefaultBufferRhiState(GpuBufferUsage usage)
+{
+    switch (gpuDefaultBufferState(usage)) {
+    case GPU_RESOURCE_STATE_VERTEX_BUFFER: return rhi::ResourceState::VertexBuffer;
+    case GPU_RESOURCE_STATE_INDEX_BUFFER: return rhi::ResourceState::IndexBuffer;
+    case GPU_RESOURCE_STATE_CONSTANT_BUFFER: return rhi::ResourceState::ConstantBuffer;
+    case GPU_RESOURCE_STATE_SHADER_RESOURCE: return rhi::ResourceState::ShaderResource;
+    case GPU_RESOURCE_STATE_UNORDERED_ACCESS: return rhi::ResourceState::UnorderedAccess;
+    case GPU_RESOURCE_STATE_INDIRECT_ARGUMENT: return rhi::ResourceState::IndirectArgument;
+    case GPU_RESOURCE_STATE_COPY_SOURCE: return rhi::ResourceState::CopySource;
+    case GPU_RESOURCE_STATE_COPY_DEST: return rhi::ResourceState::CopyDestination;
+    default: return rhi::ResourceState::General;
+    }
 }
 
 GpuResult gpuCreateBuffer(GpuDevice device, const GpuBufferDesc* desc, GpuBufferHandle* outHandle)
@@ -34,6 +60,7 @@ GpuResult gpuCreateBuffer(GpuDevice device, const GpuBufferDesc* desc, GpuBuffer
     rhiDesc.size = desc->size;
     rhiDesc.elementSize = desc->elementSize;
     rhiDesc.usage = static_cast<rhi::BufferUsage>(gpuBufferUsageToRhi(desc->usage));
+    rhiDesc.defaultState = gpuDefaultBufferRhiState(desc->usage);
     rhiDesc.label = desc->label;
     rhiDesc.memoryType = rhi::MemoryType::DeviceLocal;
 
@@ -72,6 +99,7 @@ GpuResult gpuCreateBufferInit(GpuDevice device, const GpuBufferDesc* desc, const
     rhiDesc.size = desc->size;
     rhiDesc.elementSize = desc->elementSize;
     rhiDesc.usage = static_cast<rhi::BufferUsage>(gpuBufferUsageToRhi(desc->usage));
+    rhiDesc.defaultState = gpuDefaultBufferRhiState(desc->usage);
     rhiDesc.label = desc->label;
     rhiDesc.memoryType = rhi::MemoryType::DeviceLocal;
 

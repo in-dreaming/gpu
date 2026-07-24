@@ -10,6 +10,16 @@
 
 static GpuResourceState gpuDefaultTextureState(GpuTextureUsage usage)
 {
+    const GpuTextureUsage statefulUsage = usage & (
+        GPU_TEXTURE_USAGE_UNORDERED_ACCESS |
+        GPU_TEXTURE_USAGE_RENDER_TARGET |
+        GPU_TEXTURE_USAGE_DEPTH_STENCIL |
+        GPU_TEXTURE_USAGE_PRESENT |
+        GPU_TEXTURE_USAGE_SHADER_RESOURCE |
+        GPU_TEXTURE_USAGE_COPY_DEST |
+        GPU_TEXTURE_USAGE_COPY_SOURCE);
+    if (statefulUsage && (statefulUsage & (statefulUsage - 1)) != 0)
+        return GPU_RESOURCE_STATE_COMMON;
     if (usage & GPU_TEXTURE_USAGE_UNORDERED_ACCESS) return GPU_RESOURCE_STATE_UNORDERED_ACCESS;
     if (usage & GPU_TEXTURE_USAGE_RENDER_TARGET) return GPU_RESOURCE_STATE_RENDER_TARGET;
     if (usage & GPU_TEXTURE_USAGE_DEPTH_STENCIL) return GPU_RESOURCE_STATE_DEPTH_WRITE;
