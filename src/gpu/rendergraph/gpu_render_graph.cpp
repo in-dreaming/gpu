@@ -720,7 +720,9 @@ void gpuGraphPassSetDepthAttachment(GpuGraphPass pass, const GpuGraphDepthAttach
     if (!pass || !attachment) return;
     pass->depthAttachment = *attachment;
     pass->hasDepth = true;
-    addAccess(pass, attachment->resource, GPU_GRAPH_ACCESS_WRITE, 0, 0);
+    addAccess(pass, attachment->resource,
+              attachment->readOnly ? GPU_GRAPH_ACCESS_READ : GPU_GRAPH_ACCESS_WRITE,
+              0, 0);
 }
 
 void gpuGraphPassSetCallback(GpuGraphPass pass, GpuGraphPassCallback callback, void* userData)
@@ -1114,8 +1116,15 @@ GpuResult gpuGraphCompile(GpuGraph graph)
             uint32_t ri = pass.depthAttachment.resource - 1;
             if (ri < resCount) {
                 auto& res = graph->resources[ri];
-                pushBarrier(barriers, res, ri, pi, GPU_RESOURCE_STATE_DEPTH_WRITE,
-                            GPU_ACCESS_DEPTH_WRITE, 0, 0);
+                pushBarrier(
+                    barriers, res, ri, pi,
+                    pass.depthAttachment.readOnly
+                        ? GPU_RESOURCE_STATE_DEPTH_READ
+                        : GPU_RESOURCE_STATE_DEPTH_WRITE,
+                    pass.depthAttachment.readOnly
+                        ? GPU_ACCESS_DEPTH_READ
+                        : GPU_ACCESS_DEPTH_WRITE,
+                    0, 0);
             }
         }
 

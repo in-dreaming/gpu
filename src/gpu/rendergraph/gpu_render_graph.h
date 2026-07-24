@@ -124,6 +124,7 @@ typedef struct {
     GpuStoreOp storeOp;
     float clearDepth;
     uint8_t clearStencil;
+    bool readOnly; // bind as a read-only depth attachment and transition to DEPTH_READ
     GpuTextureHandle depthViewOverride; // optional; when set, binds this DSV instead of the texture default
 } GpuGraphDepthAttachment;
 

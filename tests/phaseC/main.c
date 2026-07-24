@@ -479,9 +479,29 @@ int main(void)
         };
         gpuGraphPassSetDepthAttachment(pass, &da);
 
+        GpuGraphPass readOnlyPass =
+            gpuGraphAddRenderPass(graph, "read_only_depth_pass");
+        GpuGraphColorAttachment readOnlyColor = {
+            .resource = colorRes,
+            .loadOp = GPU_LOAD_OP_LOAD,
+            .storeOp = GPU_STORE_OP_STORE,
+        };
+        gpuGraphPassSetColorAttachments(readOnlyPass, 1, &readOnlyColor);
+        GpuGraphDepthAttachment readOnlyDepth = {
+            .resource = depthRes,
+            .loadOp = GPU_LOAD_OP_LOAD,
+            .storeOp = GPU_STORE_OP_STORE,
+            .readOnly = true,
+        };
+        gpuGraphPassSetDepthAttachment(readOnlyPass, &readOnlyDepth);
+
         CHECK(gpuGraphCompile(graph));
+        GpuTextureHandle depthHandle = gpuGraphGetTexture(graph, depthRes);
+        CHECK_TRUE(gpuHandleIsValid(depthHandle));
         CHECK(gpuGraphExecute(graph, queue));
         gpuQueueWaitOnHost(queue);
+        CHECK_TRUE(gpuGetTextureState(device, depthHandle) ==
+                   GPU_RESOURCE_STATE_DEPTH_READ);
         gpuGraphDestroy(graph);
     }
     printf("  OK\n"); flush();
