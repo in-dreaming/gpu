@@ -44,6 +44,17 @@ static rhi::ResourceState gpuDefaultTextureRhiState(GpuTextureUsage usage)
     }
 }
 
+static bool gpuDepthFormatNeedsTypelessSampling(
+    GpuFormat format, GpuTextureUsage usage)
+{
+    if ((usage & GPU_TEXTURE_USAGE_DEPTH_STENCIL) == 0 ||
+        (usage & GPU_TEXTURE_USAGE_SHADER_RESOURCE) == 0)
+        return false;
+    return format == GPU_FORMAT_D16_UNORM ||
+           format == GPU_FORMAT_D32_FLOAT ||
+           format == GPU_FORMAT_D32_FLOAT_S8_UINT;
+}
+
 GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuTextureHandle* outHandle)
 {
     if (!device || !desc || !outHandle) return GPU_ERROR_INVALID_ARGS;
@@ -73,6 +84,11 @@ GpuResult gpuCreateTexture(GpuDevice device, const GpuTextureDesc* desc, GpuText
     }
     rhiDesc.usage = static_cast<rhi::TextureUsage>(
         gpuTextureUsageToRhi(implementationUsage));
+    if (gpuDepthFormatNeedsTypelessSampling(desc->format, desc->usage)) {
+        rhiDesc.usage = static_cast<rhi::TextureUsage>(
+            static_cast<uint32_t>(rhiDesc.usage) |
+            static_cast<uint32_t>(rhi::TextureUsage::Typeless));
+    }
     rhiDesc.defaultState = gpuDefaultTextureRhiState(desc->usage);
     rhiDesc.label = desc->label;
     rhiDesc.memoryType = rhi::MemoryType::DeviceLocal;
