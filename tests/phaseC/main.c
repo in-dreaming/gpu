@@ -1089,6 +1089,7 @@ int main(void)
         CHECK(gpuGraphExecute(graph, captureQueue));
         CHECK(gpuSurfacePresent(surface));
         CHECK(gpuQueueWaitOnHost(captureQueue));
+        CHECK_TRUE(gpuGetDeviceLastDiagnostic(captureDevice)[0] == '\0');
 
         void* mapped = NULL;
         CHECK(gpuMapReadbackBuffer(captureDevice, readback, &mapped));

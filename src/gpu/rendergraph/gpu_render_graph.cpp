@@ -1149,7 +1149,11 @@ GpuResult gpuGraphCompile(GpuGraph graph)
 
             GpuAccessFlags access = graphAccessToFlags(acc.access, pass.kind);
             GpuResourceState targetState = accessToState(acc.access, res.kind, pass.kind, false, false);
-            if (acc.access == GPU_GRAPH_ACCESS_READ)
+            // Handle-backed copy helpers perform their own transition, but a
+            // surface has no public texture handle. Keep its graph-owned
+            // CopySource transition instead of replacing it with SRV state.
+            if (acc.access == GPU_GRAPH_ACCESS_READ &&
+                (pass.kind != GPU_GRAPH_PASS_COPY || !res.isSurfaceTexture))
                 targetState = graphReadStateForResource(graph->device, res);
             if (acc.access == GPU_GRAPH_ACCESS_PRESENT)
                 targetState = GPU_RESOURCE_STATE_PRESENT;
