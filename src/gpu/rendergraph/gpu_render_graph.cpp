@@ -1439,11 +1439,8 @@ static void executeGraphPass(GpuGraph graph, GpuCommandEncoder encoder, GpuQueue
                 if (gpuHandleIsValid(pass.depthAttachment.depthViewOverride)) {
                     depthAtt.viewHandle = pass.depthAttachment.depthViewOverride;
                 } else {
-                    if (res.depthView.index == 0) {
-                        GpuTextureHandle texH = res.imported ? res.importedTexture : res.realizedTexture;
-                        gpuCreateTextureView(graph->device, texH, GPU_TEXTURE_VIEW_TYPE_DEPTH_STENCIL, &res.depthView);
-                    }
-                    depthAtt.viewHandle = res.depthView;
+                    depthAtt.textureHandle =
+                        res.imported ? res.importedTexture : res.realizedTexture;
                 }
                 depthAtt.depthLoadOp = pass.depthAttachment.loadOp;
                 depthAtt.depthStoreOp = pass.depthAttachment.storeOp;
