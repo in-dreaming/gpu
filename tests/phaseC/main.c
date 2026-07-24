@@ -130,7 +130,7 @@ int main(void)
     GpuDevice device;
     const GpuBackend backend = testBackend();
     GpuDeviceDesc devDesc = {
-        .appName = "phaseC_test", .enableDebugLayer = false, .preferredBackend = backend,
+        .appName = "phaseC_test", .enableDebugLayer = true, .preferredBackend = backend,
     };
     CHECK(gpuCreateDevice(&devDesc, &device));
 

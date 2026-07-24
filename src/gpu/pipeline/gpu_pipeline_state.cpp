@@ -592,12 +592,22 @@ extern "C" GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipe
     uint32_t gen = baseGeneration(pipeline.generation);
 
     switch (type) {
-    case GPU_PIPELINE_TYPE_GRAPHICS:
+    case GPU_PIPELINE_TYPE_GRAPHICS: {
+        rhi::IRenderPipeline* resolved =
+            g_renderPipelinePool.resolve(pipeline.index, gen);
+        if (!resolved) return GPU_ERROR_INVALID_PARAMETER;
+        resolved->release();
         g_renderPipelinePool.release(pipeline.index, gen);
         break;
-    case GPU_PIPELINE_TYPE_COMPUTE:
+    }
+    case GPU_PIPELINE_TYPE_COMPUTE: {
+        rhi::IComputePipeline* resolved =
+            g_computePipelinePool.resolve(pipeline.index, gen);
+        if (!resolved) return GPU_ERROR_INVALID_PARAMETER;
+        resolved->release();
         g_computePipelinePool.release(pipeline.index, gen);
         break;
+    }
     case GPU_PIPELINE_TYPE_RAYTRACING:
         break;
     }
