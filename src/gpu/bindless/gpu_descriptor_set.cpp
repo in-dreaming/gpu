@@ -31,6 +31,10 @@ struct GpuDescriptorBindingEntry {
     GpuSamplerHandle sampler = {0, 0};
     bool valid = false;
     uint32_t binding = 0;
+    // Kept separately from the map key because applying a descriptor set must
+    // address the element cursor, not merely the array-valued binding cursor.
+    uint32_t arrayIndex = 0;
+    bool isArray = false;
     std::string bindingName;
 };
 
@@ -198,6 +202,8 @@ GpuResult gpuUpdateDescriptorSet(
     entry.type = write->type;
     entry.valid = true;
     entry.binding = binding;
+    entry.arrayIndex = arrayIndex;
+    entry.isArray = range->count != 1;
     switch (write->type) {
     case GPU_DESCRIPTOR_WRITE_BUFFER:
         if (!gpuHandleIsValid(write->buffer)) return GPU_ERROR_INVALID_ARGS;
@@ -270,6 +276,14 @@ static void applyDescriptorSetBinding(
         rhi::ShaderCursor field = cursor[setIndex];
         if (!field.isValid()) return;
         sub = field[entry.binding];
+        if (!sub.isValid()) return;
+    }
+    // Slang represents descriptor arrays as an array-valued cursor. Binding
+    // that cursor repeatedly aliases element zero, so select the requested
+    // element before applying the descriptor write. Scalar bindings retain the
+    // existing cursor path even though their API array index is necessarily 0.
+    if (entry.isArray) {
+        sub = sub[entry.arrayIndex];
         if (!sub.isValid()) return;
     }
 
