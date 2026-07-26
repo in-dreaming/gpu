@@ -28,6 +28,12 @@ endif()
 
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+# MSVC's Windows SDK does not ship the POSIX <sys/types.h> header.  SDL's
+# uclibc compatibility target is still part of the static SDL build, so do
+# not let a stale or cross-toolchain CMake probe enable that include.
+if(MSVC)
+    set(LIBC_HAS_SYS_TYPES_H 0 CACHE INTERNAL "Have include sys/types.h" FORCE)
+endif()
 add_subdirectory(modules/3rd/sdl)
 
 set(SLANG_RHI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
