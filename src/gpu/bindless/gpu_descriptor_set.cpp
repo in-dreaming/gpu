@@ -263,19 +263,37 @@ GpuResult gpuUpdateDescriptorSetByName(
 static void applyDescriptorSetBinding(
     GpuDevice device,
     rhi::IShaderObject* rootObject,
+    GpuPipelineLayout layout,
     uint32_t setIndex,
     const GpuDescriptorBindingEntry& entry)
 {
     if (!device || !rootObject || !entry.valid) return;
+    uint32_t shaderSpace = UINT32_MAX;
+    GpuPipelineLayoutInfo info = {};
+    if (gpuGetPipelineLayoutInfo(layout, &info) == GPU_SUCCESS) {
+        for (uint32_t i = 0; i < info.descriptorSetCount; ++i) {
+            if (info.descriptorSets[i].set == setIndex) {
+                shaderSpace = info.descriptorSets[i].space;
+                break;
+            }
+        }
+    }
+    if (shaderSpace == UINT32_MAX) return;
     rhi::ShaderCursor cursor(rootObject);
     rhi::ShaderCursor sub;
     if (!entry.bindingName.empty()) {
         sub = cursor[entry.bindingName.c_str()];
     }
     if (!sub.isValid()) {
-        rhi::ShaderCursor field = cursor[setIndex];
-        if (!field.isValid()) return;
-        sub = field[entry.binding];
+        slang::TypeLayoutReflection* rootLayout = cursor.getTypeLayout();
+        if (!rootLayout || rootLayout->getKind() != slang::TypeReflection::Kind::Struct) return;
+        for (SlangInt index = 0; index < rootLayout->getFieldCount(); ++index) {
+            slang::VariableLayoutReflection* field = rootLayout->getFieldByIndex((unsigned int)index);
+            if (field && field->getBindingSpace() == shaderSpace && field->getBindingIndex() == entry.binding) {
+                sub = cursor[(uint32_t)index];
+                break;
+            }
+        }
         if (!sub.isValid()) return;
     }
     // Slang represents descriptor arrays as an array-valued cursor. Binding
@@ -321,7 +339,7 @@ void gpuCmdBindDescriptorSet(
     if (!cmd->rootShaderObject) return;
 
     for (const auto& kv : set->bindings) {
-        applyDescriptorSetBinding(cmd->device, cmd->rootShaderObject, setIndex, kv.second);
+        applyDescriptorSetBinding(cmd->device, cmd->rootShaderObject, layout, setIndex, kv.second);
     }
 }
 
@@ -334,7 +352,7 @@ void gpuCmdBindDescriptorSetPass(
     (void)layout;
     if (!pass || !set || set->setIndex != setIndex || !pass->rootShaderObject) return;
     for (const auto& kv : set->bindings) {
-        applyDescriptorSetBinding(pass->device, pass->rootShaderObject, setIndex, kv.second);
+        applyDescriptorSetBinding(pass->device, pass->rootShaderObject, layout, setIndex, kv.second);
     }
 }
 
