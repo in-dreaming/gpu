@@ -90,6 +90,37 @@ int main(void)
     printf("  OK\n"); flush();
 
     // =========================================================================
+    // [D.1a] Pipeline-owned layout - query the layout from a pipeline handle
+    // =========================================================================
+    printf("[D.1a] Pipeline-owned layout\n"); flush();
+    {
+        GpuShaderCompileDesc cdesc = {
+            .sourcePath = "reflection_test.slang",
+            .entryPoint = "computeMain",
+            .target = GPU_SHADER_TARGET_SPIRV,
+        };
+        GpuShaderProgram prog = NULL;
+        CHECK(gpuCompileShader(compiler, &cdesc, &prog));
+
+        GpuPipelineHandle pipeline = {};
+        CHECK(gpuCreateComputePipelineFromProgram(device, prog, "phaseD_layout", &pipeline));
+
+        GpuPipelineLayout layout = NULL;
+        CHECK(gpuGetPipelineLayout(device, pipeline, &layout));
+        CHECK_TRUE(layout != NULL);
+
+        GpuPipelineLayoutInfo info = {};
+        CHECK(gpuGetPipelineLayoutInfo(layout, &info));
+        CHECK_TRUE(info.bindingRangeCount > 0);
+        CHECK_TRUE(info.entryPointCount == 1);
+
+        CHECK(gpuDestroyPipeline(device, pipeline));
+        CHECK_TRUE(gpuGetPipelineLayout(device, pipeline, &layout) != GPU_SUCCESS);
+        gpuDestroyShaderProgram(prog);
+    }
+    printf("  OK\n"); flush();
+
+    // =========================================================================
     // [D.2] Binding ranges - verify binding ranges are extracted
     // =========================================================================
     printf("[D.2] Binding ranges extraction\n"); flush();

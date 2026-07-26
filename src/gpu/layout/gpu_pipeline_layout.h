@@ -154,6 +154,18 @@ typedef struct {
 // Reflect a compiled shader program to extract pipeline layout
 GpuResult gpuReflectPipelineLayout(GpuShaderProgram program, GpuPipelineLayout* outLayout);
 
+// Get the layout captured when a unified pipeline was created. The returned
+// layout is borrowed: it remains valid until gpuDestroyPipeline is called for
+// pipeline and must not be passed to gpuDestroyPipelineLayout.
+//
+// This is the offline-artifact path. Pipelines created from serialized Slang
+// module IR expose the same reflected layout used by their shader program,
+// without recompiling source at runtime.
+GpuResult gpuGetPipelineLayout(
+    GpuDevice device,
+    GpuPipelineHandle pipeline,
+    GpuPipelineLayout* outLayout);
+
 // Get layout info (pointers are valid until gpuDestroyPipelineLayout is called)
 GpuResult gpuGetPipelineLayoutInfo(GpuPipelineLayout layout, GpuPipelineLayoutInfo* outInfo);
 

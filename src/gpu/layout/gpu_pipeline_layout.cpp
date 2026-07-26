@@ -221,12 +221,13 @@ static uint64_t computeLayoutHash(const std::vector<GpuBindingRange>& ranges,
 // Main reflection function
 // ============================================================================
 
-GpuResult gpuReflectPipelineLayout(GpuShaderProgram program, GpuPipelineLayout* outLayout)
+GpuResult gpuReflectPipelineLayoutFromComponent(
+    slang::IComponentType* linkedProgram,
+    GpuPipelineLayout* outLayout)
 {
-    if (!program || !outLayout) return GPU_ERROR_INVALID_ARGS;
-    if (!program->linkedProgram) return GPU_ERROR_INVALID_ARGS;
+    if (!linkedProgram || !outLayout) return GPU_ERROR_INVALID_ARGS;
 
-    slang::ProgramLayout* programLayout = program->linkedProgram->getLayout();
+    slang::ProgramLayout* programLayout = linkedProgram->getLayout();
     if (!programLayout) return GPU_ERROR_INTERNAL;
 
     GpuPipelineLayout layout = new GpuPipelineLayout_t();
@@ -359,6 +360,12 @@ GpuResult gpuReflectPipelineLayout(GpuShaderProgram program, GpuPipelineLayout* 
 
     *outLayout = layout;
     return GPU_SUCCESS;
+}
+
+GpuResult gpuReflectPipelineLayout(GpuShaderProgram program, GpuPipelineLayout* outLayout)
+{
+    if (!program) return GPU_ERROR_INVALID_ARGS;
+    return gpuReflectPipelineLayoutFromComponent(program->linkedProgram, outLayout);
 }
 
 GpuResult gpuGetPipelineLayoutInfo(GpuPipelineLayout layout, GpuPipelineLayoutInfo* outInfo)

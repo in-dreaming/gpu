@@ -2,11 +2,14 @@
 #include "gpu/core/gpu_internal.h"
 #include "gpu/core/gpu_pipeline.h"
 #include "gpu/shader/gpu_shader_compiler.h"
+#include "gpu/layout/gpu_pipeline_layout.h"
 #include <string.h>
 #include <slang-rhi.h>
 #include <slang.h>
 #include <string>
 #include <vector>
+#include <map>
+#include <mutex>
 
 #ifdef _MSC_VER
 #pragma warning(disable : 4996)
@@ -15,6 +18,48 @@
 // Storage pools for pipeline states
 static GpuHandlePool<rhi::IRenderPipeline> g_renderPipelinePool;
 static GpuHandlePool<rhi::IComputePipeline> g_computePipelinePool;
+
+// Layout metadata is kept independently from the RHI pipeline pools because
+// the public pipeline handle intentionally stays a compact generational value.
+// Key by both fields so a recycled slot cannot return an older layout.
+static std::map<uint64_t, GpuPipelineLayout> g_pipelineLayouts;
+static std::mutex g_pipelineLayoutsMutex;
+
+static uint64_t pipelineLayoutKey(GpuPipelineHandle pipeline) {
+    return ((uint64_t)pipeline.generation << 32) | pipeline.index;
+}
+
+// Defined in gpu_pipeline_layout.cpp. It reflects the already-linked Slang
+// component used to create a pipeline; it never invokes source compilation.
+GpuResult gpuReflectPipelineLayoutFromComponent(
+    slang::IComponentType* linkedProgram,
+    GpuPipelineLayout* outLayout);
+
+static GpuResult capturePipelineLayout(
+    slang::IComponentType* linkedProgram,
+    GpuPipelineHandle pipeline)
+{
+    GpuPipelineLayout layout = nullptr;
+    GpuResult result = gpuReflectPipelineLayoutFromComponent(linkedProgram, &layout);
+    if (result != GPU_SUCCESS) return result;
+
+    std::lock_guard<std::mutex> lock(g_pipelineLayoutsMutex);
+    g_pipelineLayouts.emplace(pipelineLayoutKey(pipeline), layout);
+    return GPU_SUCCESS;
+}
+
+static void releasePipelineLayout(GpuPipelineHandle pipeline)
+{
+    GpuPipelineLayout layout = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_pipelineLayoutsMutex);
+        const auto it = g_pipelineLayouts.find(pipelineLayoutKey(pipeline));
+        if (it == g_pipelineLayouts.end()) return;
+        layout = it->second;
+        g_pipelineLayouts.erase(it);
+    }
+    gpuDestroyPipelineLayout(layout);
+}
 
 // Internal pipeline type storage in generation bits
 #define PIPELINE_TYPE_BITS 2
@@ -130,6 +175,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     device->lastError.clear();
 
     rhi::ComPtr<rhi::IShaderProgram> rhiProgram;
+    rhi::ComPtr<slang::IComponentType> layoutComponent;
 
     bool hasVertexShader = desc->vertexShader.data && desc->vertexShader.size > 0;
     bool hasFragmentShader = desc->fragmentShader.data && desc->fragmentShader.size > 0;
@@ -238,6 +284,16 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
                 }
                 return GPU_ERROR_INVALID_PARAMETER;
             }
+            std::vector<slang::IComponentType*> layoutComponents = moduleComponents;
+            for (auto& entry : entryPoints) layoutComponents.push_back(entry.get());
+            rhi::ComPtr<slang::IBlob> layoutDiagnostics;
+            if (SLANG_FAILED(slangSession->createCompositeComponentType(
+                    layoutComponents.data(), (uint32_t)layoutComponents.size(),
+                    layoutComponent.writeRef(), layoutDiagnostics.writeRef())) ||
+                !layoutComponent) {
+                device->lastError = "graphics pipeline could not compose layout reflection";
+                return GPU_ERROR_INVALID_PARAMETER;
+            }
         } else {
         std::string vsSrc((const char*)desc->vertexShader.data, (size_t)desc->vertexShader.size);
         std::string fsSrc((const char*)desc->fragmentShader.data, (size_t)desc->fragmentShader.size);
@@ -297,6 +353,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
                 linkedProgram.writeRef(), linkDiag.writeRef());
 
             if (linkedProgram) {
+                layoutComponent = linkedProgram;
                 rhi::ShaderProgramDesc programDesc = {};
                 programDesc.slangGlobalScope = linkedProgram.get();
 
@@ -412,6 +469,20 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
         GPU_PIPELINE_TYPE_GRAPHICS,
         g_renderPipelinePool.slots[index].generation);
 
+    if (layoutComponent) {
+        GpuResult layoutResult = capturePipelineLayout(layoutComponent, *outPipeline);
+        if (layoutResult != GPU_SUCCESS) {
+            rhi::IRenderPipeline* resolved = g_renderPipelinePool.resolve(
+                outPipeline->index, baseGeneration(outPipeline->generation));
+            if (resolved) resolved->release();
+            g_renderPipelinePool.release(
+                outPipeline->index, baseGeneration(outPipeline->generation));
+            *outPipeline = {};
+            device->lastError = "graphics pipeline layout reflection failed";
+            return layoutResult;
+        }
+    }
+
     return GPU_OK;
 }
 
@@ -485,6 +556,18 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
         return GPU_ERROR_INVALID_ARGS;
     }
 
+    rhi::ComPtr<slang::IComponentType> layoutComponent;
+    {
+        slang::IComponentType* layoutComponents[] = { module.get(), csEntry.get() };
+        rhi::ComPtr<slang::IBlob> layoutDiagnostics;
+        if (SLANG_FAILED(slangSession->createCompositeComponentType(
+                layoutComponents, 2, layoutComponent.writeRef(), layoutDiagnostics.writeRef())) ||
+            !layoutComponent) {
+            device->lastError = "compute pipeline could not compose layout reflection";
+            return GPU_ERROR_INVALID_PARAMETER;
+        }
+    }
+
     slang::IComponentType* components[] = { module.get(), csEntry.get() };
     rhi::ComPtr<slang::IComponentType> globalScope;
     rhi::ComPtr<slang::IBlob> linkDiag;
@@ -536,6 +619,18 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
         GPU_PIPELINE_TYPE_COMPUTE,
         g_computePipelinePool.slots[index].generation);
 
+    GpuResult layoutResult = capturePipelineLayout(layoutComponent, *outPipeline);
+    if (layoutResult != GPU_SUCCESS) {
+        rhi::IComputePipeline* resolved = g_computePipelinePool.resolve(
+            outPipeline->index, baseGeneration(outPipeline->generation));
+        if (resolved) resolved->release();
+        g_computePipelinePool.release(
+            outPipeline->index, baseGeneration(outPipeline->generation));
+        *outPipeline = {};
+        device->lastError = "compute pipeline layout reflection failed";
+        return layoutResult;
+    }
+
     return GPU_OK;
 }
 
@@ -572,6 +667,17 @@ extern "C" GpuResult gpuCreateComputePipelineFromProgram(GpuDevice device, GpuSh
         GPU_PIPELINE_TYPE_COMPUTE,
         g_computePipelinePool.slots[index].generation);
 
+    GpuResult layoutResult = capturePipelineLayout(program->linkedProgram, *outPipeline);
+    if (layoutResult != GPU_SUCCESS) {
+        rhi::IComputePipeline* resolved = g_computePipelinePool.resolve(
+            outPipeline->index, baseGeneration(outPipeline->generation));
+        if (resolved) resolved->release();
+        g_computePipelinePool.release(
+            outPipeline->index, baseGeneration(outPipeline->generation));
+        *outPipeline = {};
+        return layoutResult;
+    }
+
     return GPU_OK;
 }
 
@@ -598,6 +704,7 @@ extern "C" GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipe
         if (!resolved) return GPU_ERROR_INVALID_PARAMETER;
         resolved->release();
         g_renderPipelinePool.release(pipeline.index, gen);
+        releasePipelineLayout(pipeline);
         break;
     }
     case GPU_PIPELINE_TYPE_COMPUTE: {
@@ -606,6 +713,7 @@ extern "C" GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipe
         if (!resolved) return GPU_ERROR_INVALID_PARAMETER;
         resolved->release();
         g_computePipelinePool.release(pipeline.index, gen);
+        releasePipelineLayout(pipeline);
         break;
     }
     case GPU_PIPELINE_TYPE_RAYTRACING:
@@ -613,6 +721,36 @@ extern "C" GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipe
     }
 
     return GPU_OK;
+}
+
+GpuResult gpuGetPipelineLayout(
+    GpuDevice device,
+    GpuPipelineHandle pipeline,
+    GpuPipelineLayout* outLayout)
+{
+    if (!device || !outLayout || !gpuHandleIsValid(pipeline)) {
+        return GPU_ERROR_INVALID_ARGS;
+    }
+
+    const uint32_t generation = baseGeneration(pipeline.generation);
+    switch (decodeTypeFromGeneration(pipeline.generation)) {
+    case GPU_PIPELINE_TYPE_GRAPHICS:
+        if (!g_renderPipelinePool.resolve(pipeline.index, generation))
+            return GPU_ERROR_INVALID_ARGS;
+        break;
+    case GPU_PIPELINE_TYPE_COMPUTE:
+        if (!g_computePipelinePool.resolve(pipeline.index, generation))
+            return GPU_ERROR_INVALID_ARGS;
+        break;
+    default:
+        return GPU_ERROR_NOT_SUPPORTED;
+    }
+
+    std::lock_guard<std::mutex> lock(g_pipelineLayoutsMutex);
+    const auto it = g_pipelineLayouts.find(pipelineLayoutKey(pipeline));
+    if (it == g_pipelineLayouts.end()) return GPU_ERROR_NOT_FOUND;
+    *outLayout = it->second;
+    return GPU_SUCCESS;
 }
 
 // ============================================================================
