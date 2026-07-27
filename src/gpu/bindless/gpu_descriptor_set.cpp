@@ -272,7 +272,10 @@ static void applyDescriptorSetBinding(
         rhi::ShaderCursor field = cursor[setIndex];
         if (!field.isValid()) return;
         sub = field[entry.binding];
-        if (entry.arrayIndex != 0 && sub.isValid())
+        // `field[binding]` denotes the array object, not an element.  The
+        // zero element must be selected explicitly as well: otherwise the
+        // first descriptor write has no element cursor while later writes do.
+        if (sub.isValid())
             sub = sub[entry.arrayIndex];
         if (!sub.isValid()) return;
     }
