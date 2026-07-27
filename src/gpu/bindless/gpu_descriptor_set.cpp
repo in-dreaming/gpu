@@ -269,14 +269,22 @@ static void applyDescriptorSetBinding(
         sub = cursor[entry.bindingName.c_str()];
     }
     if (!sub.isValid()) {
-        rhi::ShaderCursor field = cursor[setIndex];
-        if (!field.isValid()) return;
-        sub = field[entry.binding];
-        // `field[binding]` denotes the array object, not an element.  The
-        // zero element must be selected explicitly as well: otherwise the
-        // first descriptor write has no element cursor while later writes do.
-        if (sub.isValid())
-            sub = sub[entry.arrayIndex];
+        // Descriptor set numbers are shader binding spaces, not root-object
+        // struct-field ordinals. Resolve the reflected field exactly as the
+        // public graphics binding API does before selecting an array element.
+        slang::TypeLayoutReflection* layout = cursor.getTypeLayout();
+        if (!layout || layout->getKind() != slang::TypeReflection::Kind::Struct) return;
+        const SlangInt count = layout->getFieldCount();
+        for (SlangInt index = 0; index < count; ++index) {
+            slang::VariableLayoutReflection* field = layout->getFieldByIndex((unsigned int)index);
+            if (field && field->getBindingSpace() == setIndex &&
+                field->getBindingIndex() == entry.binding) {
+                sub = cursor[(uint32_t)index];
+                break;
+            }
+        }
+        if (!sub.isValid()) return;
+        sub = sub[entry.arrayIndex];
         if (!sub.isValid()) return;
     }
 
