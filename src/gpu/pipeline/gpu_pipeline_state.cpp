@@ -1,11 +1,14 @@
 #include "gpu/pipeline/gpu_pipeline_state.h"
 #include "gpu/core/gpu_internal.h"
 #include "gpu/core/gpu_pipeline.h"
+#include "gpu/layout/gpu_pipeline_layout.h"
 #include "gpu/shader/gpu_shader_compiler.h"
 #include <string.h>
 #include <slang-rhi.h>
 #include <slang.h>
 #include <string>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _MSC_VER
@@ -15,6 +18,8 @@
 // Storage pools for pipeline states
 static GpuHandlePool<rhi::IRenderPipeline> g_renderPipelinePool;
 static GpuHandlePool<rhi::IComputePipeline> g_computePipelinePool;
+static std::mutex g_pipelineLayoutMutex;
+static std::unordered_map<uint64_t, GpuPipelineLayout> g_pipelineLayouts;
 
 // Internal pipeline type storage in generation bits
 #define PIPELINE_TYPE_BITS 2
@@ -33,6 +38,32 @@ static inline GpuPipelineType decodeTypeFromGeneration(uint32_t generation) {
 // Get base generation without type encoding
 static inline uint32_t baseGeneration(uint32_t generation) {
     return generation >> PIPELINE_TYPE_BITS;
+}
+
+static uint64_t pipelineLayoutKey(GpuPipelineHandle pipeline) {
+    return (uint64_t(pipeline.generation) << 32) | pipeline.index;
+}
+
+static GpuResult reflectPipelineLayout(slang::IComponentType* linkedProgram, GpuPipelineLayout* outLayout) {
+    if (!linkedProgram || !outLayout) return GPU_ERROR_INVALID_ARGS;
+    GpuShaderProgram_t program = {};
+    program.linkedProgram = linkedProgram;
+    return gpuReflectPipelineLayout(&program, outLayout);
+}
+
+static void retainPipelineLayout(GpuPipelineHandle pipeline, GpuPipelineLayout layout) {
+    if (!layout) return;
+    std::lock_guard<std::mutex> lock(g_pipelineLayoutMutex);
+    g_pipelineLayouts.emplace(pipelineLayoutKey(pipeline), layout);
+}
+
+static GpuPipelineLayout releasePipelineLayout(GpuPipelineHandle pipeline) {
+    std::lock_guard<std::mutex> lock(g_pipelineLayoutMutex);
+    const auto it = g_pipelineLayouts.find(pipelineLayoutKey(pipeline));
+    if (it == g_pipelineLayouts.end()) return nullptr;
+    const GpuPipelineLayout layout = it->second;
+    g_pipelineLayouts.erase(it);
+    return layout;
 }
 
 // Helper to convert primitive topology
@@ -130,6 +161,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     device->lastError.clear();
 
     rhi::ComPtr<rhi::IShaderProgram> rhiProgram;
+    GpuPipelineLayout pipelineLayout = nullptr;
 
     bool hasVertexShader = desc->vertexShader.data && desc->vertexShader.size > 0;
     bool hasFragmentShader = desc->fragmentShader.data && desc->fragmentShader.size > 0;
@@ -238,6 +270,10 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
                 }
                 return GPU_ERROR_INVALID_PARAMETER;
             }
+            if (reflectPipelineLayout(globalScope.get(), &pipelineLayout) != GPU_SUCCESS) {
+                device->lastError = "graphics pipeline could not reflect its precompiled layout";
+                return GPU_ERROR_INTERNAL;
+            }
         } else {
         std::string vsSrc((const char*)desc->vertexShader.data, (size_t)desc->vertexShader.size);
         std::string fsSrc((const char*)desc->fragmentShader.data, (size_t)desc->fragmentShader.size);
@@ -306,6 +342,10 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
                 programDesc.slangEntryPointCount = (uint32_t)rawEntries.size();
 
                 device->rhiDevice->createShaderProgram(programDesc, rhiProgram.writeRef());
+                if (reflectPipelineLayout(linkedProgram.get(), &pipelineLayout) != GPU_SUCCESS) {
+                    device->lastError = "graphics pipeline could not reflect its source layout";
+                    return GPU_ERROR_INTERNAL;
+                }
             }
         }
         }
@@ -395,6 +435,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     rhi::Result r = device->rhiDevice->createRenderPipeline(rhiDesc, rhiPipeline.writeRef());
 
     if (SLANG_FAILED(r)) {
+        gpuDestroyPipelineLayout(pipelineLayout);
         std::lock_guard<std::mutex> lock(device->debugMutex);
         if (device->lastError.empty()) {
             device->lastError = "graphics render pipeline creation failed";
@@ -404,6 +445,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
 
     uint32_t index = g_renderPipelinePool.allocate(rhiPipeline.detach());
     if (index == 0) {
+        gpuDestroyPipelineLayout(pipelineLayout);
         return GPU_ERROR_OUT_OF_MEMORY;
     }
 
@@ -411,6 +453,7 @@ extern "C" GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphi
     outPipeline->generation = encodeTypeInGeneration(
         GPU_PIPELINE_TYPE_GRAPHICS,
         g_renderPipelinePool.slots[index].generation);
+    retainPipelineLayout(*outPipeline, pipelineLayout);
 
     return GPU_OK;
 }
@@ -514,6 +557,12 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
         return GPU_ERROR_INVALID_PARAMETER;
     }
 
+    GpuPipelineLayout pipelineLayout = nullptr;
+    if (reflectPipelineLayout(globalScope.get(), &pipelineLayout) != GPU_SUCCESS) {
+        device->lastError = "compute pipeline could not reflect its layout";
+        return GPU_ERROR_INTERNAL;
+    }
+
     rhi::ComputePipelineDesc rhiDesc = {};
     rhiDesc.program = rhiProgram;
     rhiDesc.label = desc->label;
@@ -522,12 +571,14 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
     rhi::Result r = device->rhiDevice->createComputePipeline(rhiDesc, rhiPipeline.writeRef());
 
     if (SLANG_FAILED(r)) {
+        gpuDestroyPipelineLayout(pipelineLayout);
         device->lastError = "compute pipeline state creation failed";
         return GPU_ERROR_UNKNOWN;
     }
 
     uint32_t index = g_computePipelinePool.allocate(rhiPipeline.detach());
     if (index == 0) {
+        gpuDestroyPipelineLayout(pipelineLayout);
         return GPU_ERROR_OUT_OF_MEMORY;
     }
 
@@ -535,6 +586,7 @@ extern "C" GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComput
     outPipeline->generation = encodeTypeInGeneration(
         GPU_PIPELINE_TYPE_COMPUTE,
         g_computePipelinePool.slots[index].generation);
+    retainPipelineLayout(*outPipeline, pipelineLayout);
 
     return GPU_OK;
 }
@@ -547,6 +599,11 @@ extern "C" GpuResult gpuCreateComputePipelineFromProgram(GpuDevice device, GpuSh
     if (!device || !program || !outPipeline) {
         return GPU_ERROR_INVALID_PARAMETER;
     }
+    GpuPipelineLayout pipelineLayout = nullptr;
+    if (reflectPipelineLayout(program->linkedProgram.get(), &pipelineLayout) != GPU_SUCCESS) {
+        device->lastError = "compute pipeline could not reflect its program layout";
+        return GPU_ERROR_INTERNAL;
+    }
 
     // Build RHI compute pipeline state using the shader program
     rhi::ComputePipelineDesc rhiDesc = {};
@@ -558,12 +615,14 @@ extern "C" GpuResult gpuCreateComputePipelineFromProgram(GpuDevice device, GpuSh
     rhi::Result r = device->rhiDevice->createComputePipeline(rhiDesc, rhiPipeline.writeRef());
     
     if (SLANG_FAILED(r)) {
+        gpuDestroyPipelineLayout(pipelineLayout);
         return GPU_ERROR_UNKNOWN;
     }
 
     // Store in pool
     uint32_t index = g_computePipelinePool.allocate(rhiPipeline.detach());
     if (index == 0) {
+        gpuDestroyPipelineLayout(pipelineLayout);
         return GPU_ERROR_OUT_OF_MEMORY;
     }
     
@@ -571,6 +630,7 @@ extern "C" GpuResult gpuCreateComputePipelineFromProgram(GpuDevice device, GpuSh
     outPipeline->generation = encodeTypeInGeneration(
         GPU_PIPELINE_TYPE_COMPUTE,
         g_computePipelinePool.slots[index].generation);
+    retainPipelineLayout(*outPipeline, pipelineLayout);
 
     return GPU_OK;
 }
@@ -612,7 +672,18 @@ extern "C" GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipe
         break;
     }
 
+    gpuDestroyPipelineLayout(releasePipelineLayout(pipeline));
+
     return GPU_OK;
+}
+
+extern "C" GpuResult gpuGetPipelineLayout(GpuDevice device, GpuPipelineHandle pipeline, GpuPipelineLayout* outLayout) {
+    if (!device || !outLayout || !gpuHandleIsValid(pipeline)) return GPU_ERROR_INVALID_ARGS;
+    std::lock_guard<std::mutex> lock(g_pipelineLayoutMutex);
+    const auto it = g_pipelineLayouts.find(pipelineLayoutKey(pipeline));
+    if (it == g_pipelineLayouts.end()) return GPU_ERROR_NOT_FOUND;
+    *outLayout = it->second;
+    return GPU_SUCCESS;
 }
 
 // ============================================================================

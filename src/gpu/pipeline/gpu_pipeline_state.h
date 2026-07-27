@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 typedef struct GpuDevice_t* GpuDevice;
+typedef struct GpuPipelineLayout_t* GpuPipelineLayout;
 
 // ============================================================================
 // Pipeline Types (Phase 2 Unified)
@@ -192,6 +193,12 @@ typedef struct GpuPipelineDesc {
 GpuResult gpuCreateGraphicsPipeline(GpuDevice device, const GpuGraphicsPipelineDesc* desc, GpuPipelineHandle* outPipeline);
 GpuResult gpuCreateComputePipeline2(GpuDevice device, const GpuComputePipelineDesc2* desc, GpuPipelineHandle* outPipeline);
 GpuResult gpuDestroyPipeline(GpuDevice device, GpuPipelineHandle pipeline);
+
+// Returns the immutable reflection layout retained by a successfully created
+// pipeline. The returned pointer is borrowed and remains valid until the
+// matching gpuDestroyPipeline call; callers must not destroy it themselves.
+// This works for both source and offline module-IR/bytecode pipeline paths.
+GpuResult gpuGetPipelineLayout(GpuDevice device, GpuPipelineHandle pipeline, GpuPipelineLayout* outLayout);
 
 // Create compute pipeline from a compiled shader program (convenience function)
 // This is useful when you have a GpuShaderProgram from gpuCompileShader

@@ -1156,6 +1156,12 @@ int main(void)
         GpuPipelineHandle pipeline = GPU_NULL_HANDLE;
         CHECK(gpuCreateComputePipeline2(device, &desc, &pipeline));
         CHECK_TRUE(gpuGetPipelineType(device, pipeline) == GPU_PIPELINE_TYPE_COMPUTE);
+        GpuPipelineLayout layout = NULL;
+        CHECK(gpuGetPipelineLayout(device, pipeline, &layout));
+        GpuPipelineLayoutInfo layoutInfo = {0};
+        CHECK(gpuGetPipelineLayoutInfo(layout, &layoutInfo));
+        CHECK_TRUE(layoutInfo.entryPointCount == 1);
+        CHECK_TRUE(layoutInfo.entryPoints[0].stage == GPU_STAGE_COMPUTE);
         CHECK(gpuDestroyPipeline(device, pipeline));
     }
     printf("  OK\n"); flush();
