@@ -105,6 +105,8 @@ GpuResult gpuCmdSetBindingBuffer(GpuRenderPassEncoder pass, uint32_t set, uint32
                                  GpuBufferHandle buffer, uint64_t offset, uint64_t range,
                                  GpuBufferBindingAccess access);
 GpuResult gpuCmdSetBindingTexture(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, GpuTextureHandle texture);
+GpuResult gpuCmdSetBindingTextureArrayElement(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding,
+                                              uint32_t arrayIndex, GpuTextureHandle texture);
 GpuResult gpuCmdSetBindingSampler(GpuRenderPassEncoder pass, uint32_t set, uint32_t binding, GpuHandle sampler);
 void gpuCmdDraw(GpuRenderPassEncoder pass, uint32_t vertexCount, uint32_t instanceCount,
                 uint32_t startVertex, uint32_t startInstance);
