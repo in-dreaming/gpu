@@ -31,6 +31,7 @@ struct GpuDescriptorBindingEntry {
     GpuSamplerHandle sampler = {0, 0};
     bool valid = false;
     uint32_t binding = 0;
+    uint32_t arrayIndex = 0;
     std::string bindingName;
 };
 
@@ -198,6 +199,7 @@ GpuResult gpuUpdateDescriptorSet(
     entry.type = write->type;
     entry.valid = true;
     entry.binding = binding;
+    entry.arrayIndex = arrayIndex;
     switch (write->type) {
     case GPU_DESCRIPTOR_WRITE_BUFFER:
         if (!gpuHandleIsValid(write->buffer)) return GPU_ERROR_INVALID_ARGS;
@@ -270,6 +272,8 @@ static void applyDescriptorSetBinding(
         rhi::ShaderCursor field = cursor[setIndex];
         if (!field.isValid()) return;
         sub = field[entry.binding];
+        if (entry.arrayIndex != 0 && sub.isValid())
+            sub = sub[entry.arrayIndex];
         if (!sub.isValid()) return;
     }
 
