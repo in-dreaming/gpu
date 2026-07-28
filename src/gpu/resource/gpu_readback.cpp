@@ -76,23 +76,28 @@ static uint32_t alignTo(uint32_t value, uint32_t alignment)
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
-static GpuResult getTextureFootprint(
-    rhi::ITexture* texture,
+static GpuResult getFootprint(
+    GpuFormat format,
+    uint32_t width,
+    uint32_t height,
+    uint32_t depth,
+    uint32_t mipCount,
     uint32_t mipLevel,
     GpuTextureFootprint* outFootprint)
 {
-    if (!texture || !outFootprint) return GPU_ERROR_INVALID_ARGS;
-    const auto& desc = texture->getDesc();
-    if (mipLevel >= desc.mipCount) return GPU_ERROR_INVALID_ARGS;
-
-    const uint32_t width = std::max(1u, desc.size.width >> mipLevel);
-    const uint32_t height = std::max(1u, desc.size.height >> mipLevel);
-    const uint32_t depth = std::max(1u, desc.size.depth >> mipLevel);
+    if (!outFootprint || width == 0 || height == 0 || depth == 0 || mipCount == 0 ||
+        mipLevel >= mipCount || format == GPU_FORMAT_UNDEFINED)
+        return GPU_ERROR_INVALID_ARGS;
+    width = std::max(1u, width >> mipLevel);
+    height = std::max(1u, height >> mipLevel);
+    depth = std::max(1u, depth >> mipLevel);
+    const rhi::Format rhiFormat = gpuFormatToRhi(format);
+    if (rhiFormat == rhi::Format::Undefined) return GPU_ERROR_NOT_SUPPORTED;
     const uint32_t rowPitch =
-        alignTo(width * getFormatBytesPerPixel(desc.format), GPU_MIN_ROW_PITCH_ALIGNMENT);
+        alignTo(width * getFormatBytesPerPixel(rhiFormat), GPU_MIN_ROW_PITCH_ALIGNMENT);
     const uint32_t slicePitch = rowPitch * height;
     *outFootprint = {
-        getGpuFormat(desc.format),
+        format,
         width,
         height,
         depth,
@@ -100,9 +105,20 @@ static GpuResult getTextureFootprint(
         slicePitch,
         (uint64_t)slicePitch * depth,
     };
-    return outFootprint->format == GPU_FORMAT_UNDEFINED
-        ? GPU_ERROR_NOT_SUPPORTED
-        : GPU_SUCCESS;
+    return GPU_SUCCESS;
+}
+
+static GpuResult getTextureFootprint(
+    rhi::ITexture* texture,
+    uint32_t mipLevel,
+    GpuTextureFootprint* outFootprint)
+{
+    if (!texture) return GPU_ERROR_INVALID_ARGS;
+    const auto& desc = texture->getDesc();
+    const GpuFormat format = getGpuFormat(desc.format);
+    if (format == GPU_FORMAT_UNDEFINED) return GPU_ERROR_NOT_SUPPORTED;
+    return getFootprint(format, desc.size.width, desc.size.height,
+                        desc.size.depth, desc.mipCount, mipLevel, outFootprint);
 }
 
 GpuResult gpuCreateReadbackBuffer(GpuDevice device, uint64_t size, GpuBufferHandle* outHandle)
@@ -192,6 +208,16 @@ GpuResult gpuGetTextureReadbackFootprint(
     rhi::ITexture* rhiTexture =
         device->texturePool.resolve(texture.index, texture.generation);
     return getTextureFootprint(rhiTexture, mipLevel, outFootprint);
+}
+
+GpuResult gpuGetTextureDescReadbackFootprint(
+    const GpuTextureDesc* texture,
+    uint32_t mipLevel,
+    GpuTextureFootprint* outFootprint)
+{
+    if (!texture) return GPU_ERROR_INVALID_ARGS;
+    return getFootprint(texture->format, texture->width, texture->height,
+                        texture->depth, texture->mipCount, mipLevel, outFootprint);
 }
 
 GpuResult gpuGetSurfaceTextureReadbackFootprint(

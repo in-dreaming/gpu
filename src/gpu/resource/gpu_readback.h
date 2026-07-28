@@ -3,6 +3,7 @@
 #include "gpu/core/gpu_types.h"
 #include "gpu/core/gpu_handle.h"
 #include "gpu/core/gpu_format.h"
+#include "gpu/core/gpu_texture.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,6 +34,13 @@ void gpuUnmapReadbackBuffer(GpuDevice device, GpuBufferHandle handle);
 GpuResult gpuGetTextureReadbackFootprint(
     GpuDevice device,
     GpuTextureHandle texture,
+    uint32_t mipLevel,
+    GpuTextureFootprint* outFootprint);
+// Computes the exact backend readback layout a texture with this descriptor
+// will use. Render-graph owners use this before the texture is realized so
+// they can size graph-owned readback buffers without guessing row alignment.
+GpuResult gpuGetTextureDescReadbackFootprint(
+    const GpuTextureDesc* texture,
     uint32_t mipLevel,
     GpuTextureFootprint* outFootprint);
 GpuResult gpuGetSurfaceTextureReadbackFootprint(
