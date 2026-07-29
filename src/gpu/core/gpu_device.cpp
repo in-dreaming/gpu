@@ -827,6 +827,22 @@ GpuResult gpuCmdSetComputeBindingTexture(
         : GPU_ERROR_INTERNAL;
 }
 
+GpuResult gpuCmdSetComputeBindingTextureView(
+    GpuComputePassEncoder pass,
+    uint32_t set,
+    uint32_t binding,
+    GpuTextureHandle textureView)
+{
+    if (!pass || !gpuHandleIsValid(textureView)) return GPU_ERROR_INVALID_ARGS;
+    rhi::ITextureView* resolved =
+        pass->device->textureViewPool.resolve(textureView.index, textureView.generation);
+    rhi::ShaderCursor cursor = computeBindingCursor(pass, set, binding);
+    if (!resolved || !cursor.isValid()) return GPU_ERROR_INVALID_ARGS;
+    return SLANG_SUCCEEDED(cursor.setBinding(rhi::Binding(resolved)))
+        ? GPU_SUCCESS
+        : GPU_ERROR_INTERNAL;
+}
+
 GpuResult gpuCmdSetComputeBindingSampler(
     GpuComputePassEncoder pass,
     uint32_t set,
