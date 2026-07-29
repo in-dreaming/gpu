@@ -689,6 +689,18 @@ void gpuGraphPassReadIndirect(GpuGraphPass pass, GpuGraphResource resource)
 {
     addAccess(pass, resource, GPU_GRAPH_ACCESS_INDIRECT, 0, 0);
 }
+void gpuGraphPassReadVertex(GpuGraphPass pass, GpuGraphResource resource)
+{
+    addAccess(pass, resource, GPU_GRAPH_ACCESS_VERTEX, 0, 0);
+}
+void gpuGraphPassReadIndex(GpuGraphPass pass, GpuGraphResource resource)
+{
+    addAccess(pass, resource, GPU_GRAPH_ACCESS_INDEX, 0, 0);
+}
+void gpuGraphPassReadConstant(GpuGraphPass pass, GpuGraphResource resource)
+{
+    addAccess(pass, resource, GPU_GRAPH_ACCESS_CONSTANT, 0, 0);
+}
 
 void gpuGraphPassReadSubresource(GpuGraphPass pass, GpuGraphResource resource,
                                  uint32_t mipLevel, uint32_t arrayLayer)
@@ -759,6 +771,9 @@ static GpuResourceState accessToState(GpuGraphAccess access, GpuGraphResourceKin
 {
     if (access == GPU_GRAPH_ACCESS_PRESENT) return GPU_RESOURCE_STATE_PRESENT;
     if (access == GPU_GRAPH_ACCESS_INDIRECT) return GPU_RESOURCE_STATE_INDIRECT_ARGUMENT;
+    if (access == GPU_GRAPH_ACCESS_VERTEX) return GPU_RESOURCE_STATE_VERTEX_BUFFER;
+    if (access == GPU_GRAPH_ACCESS_INDEX) return GPU_RESOURCE_STATE_INDEX_BUFFER;
+    if (access == GPU_GRAPH_ACCESS_CONSTANT) return GPU_RESOURCE_STATE_CONSTANT_BUFFER;
     if (isColorAttachment) return GPU_RESOURCE_STATE_RENDER_TARGET;
     if (isDepthAttachment) return GPU_RESOURCE_STATE_DEPTH_WRITE;
     if (passKind == GPU_GRAPH_PASS_COPY) {
@@ -768,6 +783,16 @@ static GpuResourceState accessToState(GpuGraphAccess access, GpuGraphResourceKin
     if (access == GPU_GRAPH_ACCESS_WRITE || access == GPU_GRAPH_ACCESS_READ_WRITE)
         return GPU_RESOURCE_STATE_UNORDERED_ACCESS;
     return GPU_RESOURCE_STATE_SHADER_RESOURCE;
+}
+
+static bool graphAccessReads(GpuGraphAccess access)
+{
+    return access == GPU_GRAPH_ACCESS_READ ||
+           access == GPU_GRAPH_ACCESS_READ_WRITE ||
+           access == GPU_GRAPH_ACCESS_INDIRECT ||
+           access == GPU_GRAPH_ACCESS_VERTEX ||
+           access == GPU_GRAPH_ACCESS_INDEX ||
+           access == GPU_GRAPH_ACCESS_CONSTANT;
 }
 
 static bool graphResourceIsDepthTexture(GpuDevice device, const GpuGraphResourceRecord& res)
@@ -817,9 +842,7 @@ GpuResult gpuGraphCompile(GpuGraph graph)
             if (acc.access == GPU_GRAPH_ACCESS_WRITE || acc.access == GPU_GRAPH_ACCESS_READ_WRITE ||
                 acc.access == GPU_GRAPH_ACCESS_PRESENT)
                 passWrites[ri].insert(passIdx);
-            if (acc.access == GPU_GRAPH_ACCESS_READ ||
-                acc.access == GPU_GRAPH_ACCESS_READ_WRITE ||
-                acc.access == GPU_GRAPH_ACCESS_INDIRECT)
+            if (graphAccessReads(acc.access))
                 passReads[ri].insert(passIdx);
         }
     }
@@ -830,9 +853,7 @@ GpuResult gpuGraphCompile(GpuGraph graph)
         for (auto& acc : pass.accesses) {
             uint32_t ri = acc.resource - 1;
             if (ri >= resCount) continue;
-            if (acc.access == GPU_GRAPH_ACCESS_READ ||
-                acc.access == GPU_GRAPH_ACCESS_READ_WRITE ||
-                acc.access == GPU_GRAPH_ACCESS_INDIRECT) {
+            if (graphAccessReads(acc.access)) {
                 for (uint32_t w : passWrites[ri]) {
                     if (w != (uint32_t)pi) pass.dependencies.push_back(w);
                 }
@@ -1000,6 +1021,10 @@ GpuResult gpuGraphCompile(GpuGraph graph)
     auto graphAccessToFlags = [](GpuGraphAccess access, GpuGraphPassKind passKind) -> GpuAccessFlags {
         if (access == GPU_GRAPH_ACCESS_PRESENT) return GPU_ACCESS_PRESENT;
         if (access == GPU_GRAPH_ACCESS_INDIRECT) return GPU_ACCESS_INDIRECT;
+        if (access == GPU_GRAPH_ACCESS_VERTEX ||
+            access == GPU_GRAPH_ACCESS_INDEX ||
+            access == GPU_GRAPH_ACCESS_CONSTANT)
+            return GPU_ACCESS_SHADER_READ;
         if (passKind == GPU_GRAPH_PASS_COPY) {
             if (access == GPU_GRAPH_ACCESS_READ) return GPU_ACCESS_COPY_READ;
             return GPU_ACCESS_COPY_WRITE;
@@ -2106,6 +2131,9 @@ static std::string buildGraphJsonString(GpuGraph graph)
             case GPU_GRAPH_ACCESS_READ_WRITE: f << "\"readwrite\""; break;
             case GPU_GRAPH_ACCESS_PRESENT: f << "\"present\""; break;
             case GPU_GRAPH_ACCESS_INDIRECT: f << "\"indirect\""; break;
+            case GPU_GRAPH_ACCESS_VERTEX: f << "\"vertex\""; break;
+            case GPU_GRAPH_ACCESS_INDEX: f << "\"index\""; break;
+            case GPU_GRAPH_ACCESS_CONSTANT: f << "\"constant\""; break;
             }
             f << "}";
         }

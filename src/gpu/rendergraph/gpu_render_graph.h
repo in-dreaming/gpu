@@ -39,6 +39,9 @@ typedef enum {
     GPU_GRAPH_ACCESS_READ_WRITE = 2,
     GPU_GRAPH_ACCESS_PRESENT = 3,
     GPU_GRAPH_ACCESS_INDIRECT = 4,
+    GPU_GRAPH_ACCESS_VERTEX = 5,
+    GPU_GRAPH_ACCESS_INDEX = 6,
+    GPU_GRAPH_ACCESS_CONSTANT = 7,
 } GpuGraphAccess;
 
 typedef struct GpuGraphPassContext {
@@ -96,6 +99,9 @@ void gpuGraphPassRead(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassWrite(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassReadWrite(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassReadIndirect(GpuGraphPass pass, GpuGraphResource resource);
+void gpuGraphPassReadVertex(GpuGraphPass pass, GpuGraphResource resource);
+void gpuGraphPassReadIndex(GpuGraphPass pass, GpuGraphResource resource);
+void gpuGraphPassReadConstant(GpuGraphPass pass, GpuGraphResource resource);
 void gpuGraphPassReadSubresource(GpuGraphPass pass, GpuGraphResource resource,
                                  uint32_t mipLevel, uint32_t arrayLayer);
 void gpuGraphPassWriteSubresource(GpuGraphPass pass, GpuGraphResource resource,

@@ -1383,6 +1383,72 @@ int main(void)
     }
     printf("  OK\n"); flush();
 
+    /* C.51 Typed graph buffer reads preserve raster/constant states */
+    printf("[C.51] Typed graph buffer read states\n"); flush();
+    {
+        const struct {
+            GpuBufferUsage usage;
+            GpuResourceState initialState;
+            GpuResourceState expectedState;
+            void (*declareRead)(GpuGraphPass, GpuGraphResource);
+            const char* name;
+        } cases[] = {
+            {
+                GPU_BUFFER_USAGE_VERTEX_BUFFER,
+                GPU_RESOURCE_STATE_COPY_DEST,
+                GPU_RESOURCE_STATE_VERTEX_BUFFER,
+                gpuGraphPassReadVertex,
+                "typed_vertex_read",
+            },
+            {
+                GPU_BUFFER_USAGE_INDEX_BUFFER,
+                GPU_RESOURCE_STATE_COPY_DEST,
+                GPU_RESOURCE_STATE_INDEX_BUFFER,
+                gpuGraphPassReadIndex,
+                "typed_index_read",
+            },
+            {
+                GPU_BUFFER_USAGE_CONSTANT_BUFFER,
+                GPU_RESOURCE_STATE_COPY_DEST,
+                GPU_RESOURCE_STATE_CONSTANT_BUFFER,
+                gpuGraphPassReadConstant,
+                "typed_constant_read",
+            },
+        };
+        for (uint32_t caseIndex = 0; caseIndex < sizeof(cases) / sizeof(cases[0]); ++caseIndex) {
+            GpuBufferDesc desc = {
+                .size = 256,
+                .elementSize = 4,
+                .usage = cases[caseIndex].usage | GPU_BUFFER_USAGE_COPY_DEST,
+                .label = cases[caseIndex].name,
+            };
+            GpuBufferHandle handle;
+            CHECK(gpuCreateBuffer(device, &desc, &handle));
+            GpuGraph graph;
+            CHECK(gpuGraphCreate(device, &graph));
+            GpuGraphResource buffer = gpuGraphImportBufferEx(
+                graph,
+                handle,
+                cases[caseIndex].initialState,
+                cases[caseIndex].expectedState,
+                cases[caseIndex].name);
+            GpuGraphPass pass = gpuGraphAddRenderPass(graph, cases[caseIndex].name);
+            cases[caseIndex].declareRead(pass, buffer);
+            gpuGraphPassSetCallback(pass, noop_pass_callback, NULL);
+            CHECK(gpuGraphCompile(graph));
+            CHECK_TRUE(gpuGraphGetPassBarrierCount(graph, 0) > 0);
+            GpuGraphBarrierInfo info = {0};
+            CHECK(gpuGraphGetPassBarrier(graph, 0, 0, &info));
+            CHECK_TRUE(info.after == cases[caseIndex].expectedState);
+            CHECK(gpuGraphExecute(graph, queue));
+            CHECK(gpuQueueWaitOnHost(queue));
+            CHECK_TRUE(gpuGetBufferState(device, handle) == cases[caseIndex].expectedState);
+            gpuGraphDestroy(graph);
+            gpuDestroyBuffer(device, handle);
+        }
+    }
+    printf("  OK\n"); flush();
+
     if (isSoftwareVulkanAdapter(device)) {
         printf("[C.30-C.38] Skipped on software Vulkan\n"); flush();
         goto phasec_finish_tests;
